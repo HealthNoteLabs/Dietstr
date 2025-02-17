@@ -1,0 +1,41 @@
+# Dependencies
+node_modules
+package-lock.json
+
+# Build outputs
+dist
+build
+server/public
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE and Editor files
+.vscode
+.idea
+*.sublime-*
+.DS_Store
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+debug.log
+
+# Vite
+vite.config.ts.*
+*.timestamp-*
+
+# Replit specific
+.replit
+.cache
+.upm
+*.nix
+replit.nix
+
+# System files
+*.log
+*.tar.gz
+Thumbs.db
