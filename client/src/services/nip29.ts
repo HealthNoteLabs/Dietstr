@@ -67,6 +67,22 @@ export async function createGroup(
       about: params.about,
       picture: params.picture
     });
+    
+    // Add tags for discoverability
+    event.tags.push(['t', 'dietstr']); // Main app tag
+    event.tags.push(['t', 'diet']);
+    event.tags.push(['t', 'nutrition']);
+    
+    // Add any additional tags from the name/description
+    if (params.name.toLowerCase().includes('keto') || params.about.toLowerCase().includes('keto')) {
+      event.tags.push(['t', 'keto']);
+    }
+    if (params.name.toLowerCase().includes('vegan') || params.about.toLowerCase().includes('vegan')) {
+      event.tags.push(['t', 'vegan']);
+    }
+    if (params.name.toLowerCase().includes('weight') || params.about.toLowerCase().includes('weight')) {
+      event.tags.push(['t', 'weightloss']);
+    }
 
     // Sign and publish the event
     await event.publish();
@@ -80,6 +96,18 @@ export async function createGroup(
     ];
     adminEvent.content = '';
     await adminEvent.publish();
+    
+    // Also create a regular membership event for better compatibility
+    const memberEvent = new NDKEvent(ndk);
+    memberEvent.kind = GROUP_EVENT_KINDS.GROUP_MEMBER;
+    memberEvent.tags = [
+      ['e', event.id, '', 'root'],  // Tag the group event
+      ['role', 'member']            // Specify role as member
+    ];
+    memberEvent.content = '';
+    await memberEvent.publish();
+
+    console.log(`Group created with ID: ${event.id} and published to relays`);
 
     // Return the group info
     return {
@@ -101,54 +129,105 @@ export async function createGroup(
  * @param ndk NDK instance
  * @returns Array of groups
  */
-export async function fetchGroups(ndk: NDK): Promise<GroupInfo[]> {
+/**
+ * Interface for group filtering options
+ */
+export interface GroupFilterOptions {
+  tags?: string[];      // Tags to filter by
+  onlyDietstr?: boolean; // Only show Dietstr-specific groups
+  search?: string;      // Search text
+  limit?: number;       // Maximum number of groups to return
+}
+
+/**
+ * Fetch available groups with filtering options
+ * @param ndk NDK instance
+ * @param options Filtering options
+ * @returns Array of groups matching the filters
+ */
+export async function fetchGroups(
+  ndk: NDK, 
+  options: GroupFilterOptions = {}
+): Promise<GroupInfo[]> {
   try {
     console.log('Fetching groups from Nostr relays...');
     
-    // Fetch kind 39000 events which are group definitions
+    // Build the filter based on options
     const filter: NDKFilter = {
       kinds: [GROUP_EVENT_KINDS.GROUP_DEFINITION],
       // Add a reasonable time range to improve relay search
       since: Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60, // 90 days ago
     };
     
+    // Filter by tags if specified
+    if (options.tags && options.tags.length > 0) {
+      filter['#t'] = options.tags;
+    } else if (options.onlyDietstr) {
+      // If no specific tags but only want Dietstr groups
+      filter['#t'] = ['dietstr', 'diet', 'nutrition'];
+    }
+    
     console.log('Group search filter:', filter);
-    const events = await ndk.fetchEvents(filter);
+    const events = await ndk.fetchEvents(filter, { closeOnEose: false });
     console.log(`Received ${events.size} group events from relays`);
     
     const groups: GroupInfo[] = [];
+    
+    // Helper function to check if a group matches the search query
+    const matchesSearch = (group: GroupInfo, search: string): boolean => {
+      if (!search) return true;
+      
+      const searchLower = search.toLowerCase();
+      return (
+        group.name.toLowerCase().includes(searchLower) ||
+        group.about.toLowerCase().includes(searchLower)
+      );
+    };
+    
+    // Process events to extract group information
     for (const event of events) {
       try {
-        console.log('Processing group event:', event.id);
+        // Parse group content - handle both JSON and plain text
         let content;
         try {
           content = JSON.parse(event.content);
         } catch {
-          // If parsing fails, try to use the content directly (some clients might not JSON stringify)
+          // If parsing fails, try to use the content directly
           content = {
             name: event.content || 'Unnamed Group',
             about: '',
           };
         }
         
-        // Only add valid groups with a name
         if (content && (content.name || content.about)) {
-          groups.push({
+          const group: GroupInfo = {
             id: event.id,
             name: content.name || 'Unnamed Group',
             about: content.about || '',
             picture: content.picture,
             createdAt: event.created_at || Math.floor(Date.now() / 1000),
             createdBy: event.pubkey
-          });
+          };
+          
+          // Check if group matches search query
+          if (!options.search || matchesSearch(group, options.search)) {
+            // Include it in the results
+            groups.push(group);
+          }
         }
       } catch (error) {
         console.warn('Invalid group event format:', event);
       }
     }
     
-    console.log(`Processed ${groups.length} valid groups`);
-    return groups;
+    // Sort groups by creation date (newest first)
+    groups.sort((a, b) => b.createdAt - a.createdAt);
+    
+    // Apply limit if specified
+    const result = options.limit ? groups.slice(0, options.limit) : groups;
+    
+    console.log(`Processed ${groups.length} valid groups, returning ${result.length}`);
+    return result;
   } catch (error) {
     console.error('Failed to fetch groups:', error);
     return [];
