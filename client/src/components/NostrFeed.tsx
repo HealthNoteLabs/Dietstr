@@ -145,7 +145,7 @@ export const NostrFeed: React.FC = () => {
       return;
     }
 
-    console.log('Loading supplementary data for post:', postId);
+    console.log('Loading supplementary data from Nostr relays for post:', postId);
     setLoadedSupplementaryData(prev => new Set([...prev, postId]));
 
     const postIndex = posts.findIndex(p => p.id === postId);
@@ -153,22 +153,28 @@ export const NostrFeed: React.FC = () => {
     
     const post = posts[postIndex];
     
+    // Query Nostr relays for all interaction events related to this post
+    // These are all parallel queries to different Nostr event types
     const [comments, likes, reposts, zapReceipts] = await Promise.all([
+      // Get comments (kind 1 events that reference the post)
       ndk.fetchEvents({
-        kinds: [1], // Regular notes as comments
-        '#e': [postId] // Reference to the post
+        kinds: [1],           // Regular notes as comments in Nostr
+        '#e': [postId]        // Events referencing this post ID (e-tag in Nostr protocol)
       }),
+      // Get likes/reactions (kind 7 events)
       ndk.fetchEvents({
-        kinds: [7], // Reactions (likes)
-        '#e': [postId]
+        kinds: [7],           // Reaction events in Nostr
+        '#e': [postId]        // Reference to the specific post
       }),
+      // Get reposts (kind 6 events)
       ndk.fetchEvents({
-        kinds: [6], // Reposts
-        '#e': [postId]
+        kinds: [6],           // Repost events in Nostr
+        '#e': [postId]        // Reference to the post being reposted
       }),
+      // Get zap receipts (kind 9735 events)
       ndk.fetchEvents({
-        kinds: [9735], // Zap receipts
-        '#e': [postId]
+        kinds: [9735],        // Zap receipt events in Nostr
+        '#e': [postId]        // Reference to the post being zapped
       })
     ]);
 
@@ -292,28 +298,38 @@ export const NostrFeed: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      
+      // Only initialize connection to Nostr relays if not already done
+      if (!ndk) {
+        await initializeNostr();
+      }
 
-      await initializeNostr();
-
-      const limit = 20;
+      // Use a smaller batch size to reduce browser extension prompts
+      const limit = 10;
+      // For pagination, we get older posts based on the current page
       const since = page > 1 ? Date.now() - (page * 7 * 24 * 60 * 60 * 1000) : undefined;
   
-      // Fetch posts with diet-related hashtags
+      // Query Nostr relays for posts with diet-related hashtags
+      // This uses the NDK library to search across multiple relays
+      console.log('Querying Nostr relays for diet and nutrition posts...');
       const foodPosts = await ndk.fetchEvents({
-        kinds: [1],  // Regular notes
+        kinds: [1],  // Regular notes (kind 1 in Nostr protocol)
         limit,
         since,
-        "#t": DIET_HASHTAGS  // Filter by our diet hashtags
+        "#t": DIET_HASHTAGS  // Filter by our diet hashtags (t stands for tags in Nostr)
       });
 
+      // Sort posts by creation time (newer first)
       const postsArray = Array.from(foodPosts).sort((a, b) => b.created_at - a.created_at);
       
       if (postsArray.length < limit) {
         setHasMore(false);
       }
       
+      // Process the posts to extract relevant information
       const processedPosts = await processAndUpdatePosts(postsArray, page > 1);
       
+      // Update our state with the new posts
       if (page === 1) {
         setPosts(processedPosts);
       } else {
@@ -322,8 +338,8 @@ export const NostrFeed: React.FC = () => {
       
       setInitialLoadComplete(true);
     } catch (err) {
-      console.error('Error fetching food posts:', err);
-      setError('Failed to load posts. Please try again later.');
+      console.error('Error fetching posts from Nostr relays:', err);
+      setError('Failed to load posts from Nostr relays. Please try again later.');
     } finally {
       setLoading(false);
     }
@@ -337,10 +353,16 @@ export const NostrFeed: React.FC = () => {
 
   useEffect(() => {
     let mounted = true;
+    let initialized = false;
     
     const init = async () => {
-      if (mounted) {
-        await fetchFoodPosts();
+      if (mounted && !initialized) {
+        initialized = true;
+        
+        // Only fetch posts if we're on the first page or if we've already loaded initial data
+        if (page === 1 || initialLoadComplete) {
+          await fetchFoodPosts();
+        }
       }
     };
     
@@ -349,9 +371,9 @@ export const NostrFeed: React.FC = () => {
     return () => {
       mounted = false;
     };
-  }, [fetchFoodPosts, page]);
+  }, [fetchFoodPosts, page, initialLoadComplete]);
   
-  // Connect to WebSocket server for real-time updates
+  // Connect to WebSocket server for real-time updates from other clients
   useEffect(() => {
     // Create WebSocket connection
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -360,7 +382,7 @@ export const NostrFeed: React.FC = () => {
     
     // Connection opened
     socket.addEventListener('open', (event) => {
-      console.log('Connected to WebSocket server');
+      console.log('Connected to WebSocket server for Nostr relay event sharing');
       
       // Subscribe to food-related feed updates
       socket.send(JSON.stringify({
@@ -376,15 +398,64 @@ export const NostrFeed: React.FC = () => {
         console.log('WebSocket message received:', data);
         
         // Handle different message types
-        if (data.type === 'new_post') {
-          // Add new post to the feed
-          console.log('New post received:', data.data);
-          // Would need to refresh or add post to the feed
+        if (data.type === 'new_post' && data.feed === 'food') {
+          // Process and add the new post to our feed
+          console.log('New Nostr post received from another client:', data.data);
+          
+          // Convert the raw Nostr event into our post format
+          if (data.data && data.data.kind === 1) { // Only process kind 1 (text notes)
+            // Create an NDK event from the raw data for consistent processing
+            const ndkEvent = new NDKEvent(ndk);
+            Object.assign(ndkEvent, data.data);
+            
+            // Process the event into a post and add it to our feed
+            processBasicPostData([ndkEvent])
+              .then(processedPosts => {
+                if (processedPosts.length > 0) {
+                  setPosts(currentPosts => {
+                    // Check if we already have this post
+                    if (currentPosts.some(p => p.id === processedPosts[0].id)) {
+                      return currentPosts; // Skip if duplicate
+                    }
+                    // Add new post at the top
+                    return [processedPosts[0], ...currentPosts];
+                  });
+                }
+              })
+              .catch(err => {
+                console.error('Error processing new post from WebSocket:', err);
+              });
+          }
         }
       } catch (error) {
         console.error('Error processing WebSocket message:', error);
       }
     });
+    
+    // Create an event subscription to relay relevant Nostr events to other clients
+    if (ndk) {
+      // Relay food-related events that we receive directly from Nostr relays
+      const subscription = ndk.subscribe(
+        { kinds: [1], "#t": DIET_HASHTAGS },
+        { closeOnEose: false } // Keep subscription open
+      );
+      
+      subscription.on('event', (event: NDKEvent) => {
+        // Check if this is a new food-related event
+        const hasDietTag = event.tags?.some(tag => 
+          tag[0] === 't' && 
+          DIET_HASHTAGS.includes(tag[1])
+        );
+        
+        if (hasDietTag && socket.readyState === WebSocket.OPEN) {
+          // Relay this event to our server for distribution to other clients
+          socket.send(JSON.stringify({
+            type: 'nostr_event',
+            event: event.rawEvent()
+          }));
+        }
+      });
+    }
     
     // Listen for errors
     socket.addEventListener('error', (event) => {
@@ -395,7 +466,7 @@ export const NostrFeed: React.FC = () => {
     return () => {
       socket.close();
     };
-  }, []);
+  }, [processBasicPostData]);
 
   useEffect(() => {
     const handleScroll = () => {

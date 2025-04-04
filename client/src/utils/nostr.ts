@@ -13,7 +13,7 @@ export const initializeNostr = async () => {
   }
 
   try {
-    // Create a new NDK instance with commonly used relays
+    // Create a new NDK instance with commonly used Nostr relays
     ndk = new NDK({
       explicitRelayUrls: [
         'wss://relay.damus.io',
@@ -24,12 +24,12 @@ export const initializeNostr = async () => {
       ]
     });
 
-    // Connect to the relays
+    // Connect to the relays - this is how we access the decentralized Nostr protocol
     await ndk.connect();
     console.log('Connected to Nostr relays');
     return ndk;
   } catch (error) {
-    console.error('Failed to initialize Nostr:', error);
+    console.error('Failed to connect to Nostr relays:', error);
     throw error;
   }
 };

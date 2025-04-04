@@ -4,21 +4,41 @@ import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { insertUserSchema, insertFoodEntrySchema, insertWaterEntrySchema } from "@shared/schema";
 
+// Interface for tracking Nostr relay subscriptions
+interface NostrSubscription {
+  clientId: string;
+  topics: string[];
+}
+
 export async function registerRoutes(app: Express) {
   // Create HTTP server
   const httpServer = createServer(app);
   
-  // Create WebSocket server for real-time updates
+  // Create WebSocket server for real-time updates from Nostr relays
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   
+  // Track client subscriptions by client ID
+  const subscriptions = new Map<string, NostrSubscription>();
+  
   wss.on('connection', (ws: WebSocket) => {
-    console.log('WebSocket client connected');
+    // Create unique ID for this connection
+    const clientId = Math.random().toString(36).substring(2, 15);
+    console.log(`WebSocket client connected: ${clientId}`);
+    
+    // Store client reference with empty subscriptions
+    subscriptions.set(clientId, {
+      clientId,
+      topics: []
+    });
+    
+    // Attach client ID to WebSocket instance for later reference
+    (ws as any).clientId = clientId;
     
     // Send welcome message
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'connection',
-        message: 'Connected to Dietstr WebSocket server'
+        message: 'Connected to Dietstr WebSocket server for Nostr relay events'
       }));
     }
     
@@ -30,13 +50,30 @@ export async function registerRoutes(app: Express) {
         
         // Handle different message types
         if (data.type === 'subscribe') {
-          // Subscribe to updates for a specific feed or user
+          // Subscribe to updates for a specific feed or Nostr event type
           if (data.feed) {
+            // Store this subscription
+            const clientSub = subscriptions.get(clientId);
+            if (clientSub) {
+              clientSub.topics.push(data.feed);
+              subscriptions.set(clientId, clientSub);
+            }
+            
             ws.send(JSON.stringify({
               type: 'subscribed',
               feed: data.feed
             }));
+            
+            console.log(`Client ${clientId} subscribed to ${data.feed} feed`);
           }
+        } else if (data.type === 'nostr_event') {
+          // Client is relaying a Nostr event they received directly from a relay
+          // We'll broadcast it to other interested clients
+          console.log(`Received Nostr event from client ${clientId}:`, 
+            data.event ? `kind ${data.event.kind}` : 'unknown');
+            
+          // Broadcast to other clients
+          broadcastNostrEvent(data.event, ws);
         }
       } catch (error) {
         console.error('Error processing WebSocket message:', error);
@@ -45,9 +82,53 @@ export async function registerRoutes(app: Express) {
     
     // Handle disconnection
     ws.on('close', () => {
-      console.log('WebSocket client disconnected');
+      console.log(`WebSocket client disconnected: ${clientId}`);
+      // Remove this client's subscriptions
+      subscriptions.delete(clientId);
     });
   });
+  
+  /**
+   * Broadcast a Nostr event to all interested WebSocket clients
+   */
+  function broadcastNostrEvent(event: any, sourceWs: WebSocket) {
+    if (!event) return;
+    
+    // Determine which topic this event belongs to
+    let topic = 'unknown';
+    
+    // Kind 1 posts with food hashtags go to the food feed
+    if (event.kind === 1 && event.tags) {
+      const hasDietTag = event.tags.some((tag: string[]) => 
+        tag[0] === 't' && 
+        ['food', 'diet', 'nutrition', 'recipe', 'meal', 'cooking'].includes(tag[1])
+      );
+      
+      if (hasDietTag) {
+        topic = 'food';
+      }
+    }
+    
+    // Get the source client ID
+    const sourceClientId = (sourceWs as any).clientId;
+    
+    // Broadcast to all clients except the source
+    wss.clients.forEach((client) => {
+      if (client !== sourceWs && client.readyState === WebSocket.OPEN) {
+        const clientId = (client as any).clientId;
+        
+        // Check if this client is subscribed to this topic
+        const subscription = subscriptions.get(clientId);
+        if (subscription && subscription.topics.includes(topic)) {
+          client.send(JSON.stringify({
+            type: 'new_post',
+            feed: topic,
+            data: event
+          }));
+        }
+      }
+    });
+  }
   
   // Function to broadcast updates to all connected clients
   const broadcastUpdate = (type: string, data: any) => {
