@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { useNostrContext } from "../../contexts/NostrContext";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { fetchGroups, joinGroup } from "../../services/nip29";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 
 import {
@@ -19,14 +18,12 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "../../hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
+import { GroupInfo } from "../../services/nip29";
 
-interface GroupSummary {
-  id: string;
-  name: string;
-  about: string;
-  picture?: string;
-  createdAt: number;
-}
+// Import with type assertions to avoid TypeScript errors
+import * as nip29 from "../../services/nip29";
+const fetchGroups = nip29.fetchGroups;
+const joinGroup = nip29.joinGroup;
 
 export function GroupList() {
   const { ndk, userPubkey } = useNostrContext();
@@ -38,20 +35,25 @@ export function GroupList() {
     queryKey: ["group-memberships", userPubkey],
     queryFn: async () => {
       if (!ndk || !userPubkey) return [];
+      console.log("Fetching user memberships...");
+      
       const events = await ndk.fetchEvents({
         kinds: [9021], // Group membership events
         authors: [userPubkey],
       });
 
+      console.log(`Found ${events.size} membership events`);
+      
       const memberships: string[] = [];
       events.forEach((event: NDKEvent) => {
         // Extract group ID from the event
-        const groupId = event.tags.find(tag => tag[0] === "e")?.[1];
+        const groupId = event.tags.find((tag: string[]) => tag[0] === "e")?.[1];
         if (groupId) {
           memberships.push(groupId);
         }
       });
       
+      console.log(`User is a member of ${memberships.length} groups: ${memberships.join(', ')}`);
       return memberships;
     },
     enabled: !!ndk && !!userPubkey,
@@ -65,8 +67,14 @@ export function GroupList() {
   } = useQuery({
     queryKey: ["groups"],
     queryFn: async () => {
-      if (!ndk) return [];
-      return await fetchGroups(ndk);
+      if (!ndk) {
+        console.log("NDK not available, cannot fetch groups");
+        return [];
+      }
+      
+      console.log("Fetching all groups...");
+      const result = await fetchGroups(ndk);
+      return result;
     },
     enabled: !!ndk,
   });
@@ -84,6 +92,7 @@ export function GroupList() {
 
     setJoiningGroup(groupId);
     try {
+      console.log(`Joining group: ${groupId}`);
       await joinGroup(ndk, groupId);
       toast({
         title: "Success",
@@ -107,10 +116,18 @@ export function GroupList() {
     return memberGroups?.includes(groupId) || false;
   };
 
+  useEffect(() => {
+    // Print group information for debugging
+    if (groups && groups.length > 0) {
+      console.log(`Displaying ${groups.length} groups:`, 
+        groups.map((g: GroupInfo) => ({ id: g.id, name: g.name }))
+      );
+    }
+  }, [groups]);
+
   if (loadingGroups || loadingMemberships) {
     return (
       <div className="space-y-4">
-        <h2 className="text-2xl font-bold">Available Groups</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {[1, 2, 3].map((i) => (
             <Card key={i}>
@@ -133,11 +150,10 @@ export function GroupList() {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-2xl font-bold">Available Groups</h2>
       {groups && groups.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {groups.map((group) => (
-            <Card key={group.id}>
+          {groups.map((group: GroupInfo) => (
+            <Card key={group.id} className="overflow-hidden">
               <CardHeader className="pb-2">
                 <div className="flex items-center gap-3">
                   <Avatar className="h-12 w-12">
@@ -161,9 +177,9 @@ export function GroupList() {
               </CardContent>
               <CardFooter className="flex justify-between items-center">
                 {isMember(group.id) ? (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 w-full">
                     <Badge variant="secondary">Member</Badge>
-                    <Button asChild variant="default">
+                    <Button asChild variant="default" className="ml-auto">
                       <Link href={`/groups/${group.id}`}>View Group</Link>
                     </Button>
                   </div>

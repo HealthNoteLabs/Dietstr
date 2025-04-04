@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react';
 import { useNostrContext } from '../contexts/NostrContext';
 import { useQuery } from '@tanstack/react-query';
 import { NDKEvent } from '@nostr-dev-kit/ndk';
-import { fetchGroupById, fetchGroupMembers, postToGroup } from '../services/nip29';
+// Import with type assertions to avoid TypeScript errors
+import * as nip29 from '../services/nip29';
+const { fetchGroupById, fetchGroupMembers, postToGroup } = nip29;
 import { useToast } from './use-toast';
 
 type Member = {

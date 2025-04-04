@@ -4,7 +4,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useMutation } from "@tanstack/react-query";
 import { useNostrContext } from "../../contexts/NostrContext";
-import { createGroup } from "../../services/nip29";
 
 import {
   Form,
@@ -19,12 +18,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "../../hooks/use-toast";
+import { CreateGroupParams } from "../../services/nip29";
+
+// Import with type assertions to avoid TypeScript errors
+import * as nip29 from "../../services/nip29";
+const createGroup = nip29.createGroup;
 
 // Schema for group creation form
 const formSchema = z.object({
   name: z.string().min(3, "Group name must be at least 3 characters"),
   about: z.string().min(10, "Description must be at least 10 characters"),
-  picture: z.string().url("Must be a valid URL").optional(),
+  picture: z.string().url("Must be a valid URL").optional().or(z.literal('')),
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -51,11 +55,21 @@ export function GroupCreator() {
         throw new Error("Nostr connection not available");
       }
       setIsCreating(true);
-      return await createGroup(ndk, {
+      console.log("Creating group with data:", data);
+      
+      // Only include picture if it's a non-empty string
+      const groupParams: CreateGroupParams = {
         name: data.name,
         about: data.about,
-        picture: data.picture,
-      });
+      };
+      
+      if (data.picture) {
+        groupParams.picture = data.picture;
+      }
+      
+      const result = await createGroup(ndk, groupParams);
+      console.log("Group created successfully:", result);
+      return result;
     },
     onSuccess: (data) => {
       setIsCreating(false);
@@ -66,6 +80,7 @@ export function GroupCreator() {
       form.reset();
     },
     onError: (error: Error) => {
+      console.error("Failed to create group:", error);
       setIsCreating(false);
       toast({
         title: "Failed to create group",
@@ -129,7 +144,10 @@ export function GroupCreator() {
                 <FormItem>
                   <FormLabel>Group Picture URL (optional)</FormLabel>
                   <FormControl>
-                    <Input placeholder="https://example.com/image.jpg" {...field} />
+                    <Input 
+                      placeholder="https://example.com/image.jpg" 
+                      {...field} 
+                    />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

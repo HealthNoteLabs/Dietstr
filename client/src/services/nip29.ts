@@ -1,4 +1,4 @@
-import { NDK, NDKEvent, NDKFilter, NDKSubscription } from '@nostr-dev-kit/ndk';
+import NDK, { NDKEvent, NDKFilter, NDKSubscription } from '@nostr-dev-kit/ndk';
 
 /**
  * Event kinds used for groups according to NIP-29
@@ -103,30 +103,51 @@ export async function createGroup(
  */
 export async function fetchGroups(ndk: NDK): Promise<GroupInfo[]> {
   try {
+    console.log('Fetching groups from Nostr relays...');
+    
     // Fetch kind 39000 events which are group definitions
     const filter: NDKFilter = {
-      kinds: [GROUP_EVENT_KINDS.GROUP_DEFINITION]
+      kinds: [GROUP_EVENT_KINDS.GROUP_DEFINITION],
+      // Add a reasonable time range to improve relay search
+      since: Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60, // 90 days ago
     };
     
+    console.log('Group search filter:', filter);
     const events = await ndk.fetchEvents(filter);
+    console.log(`Received ${events.size} group events from relays`);
     
     const groups: GroupInfo[] = [];
     for (const event of events) {
       try {
-        const content = JSON.parse(event.content);
-        groups.push({
-          id: event.id,
-          name: content.name || 'Unnamed Group',
-          about: content.about || '',
-          picture: content.picture,
-          createdAt: event.created_at || 0,
-          createdBy: event.pubkey
-        });
+        console.log('Processing group event:', event.id);
+        let content;
+        try {
+          content = JSON.parse(event.content);
+        } catch {
+          // If parsing fails, try to use the content directly (some clients might not JSON stringify)
+          content = {
+            name: event.content || 'Unnamed Group',
+            about: '',
+          };
+        }
+        
+        // Only add valid groups with a name
+        if (content && (content.name || content.about)) {
+          groups.push({
+            id: event.id,
+            name: content.name || 'Unnamed Group',
+            about: content.about || '',
+            picture: content.picture,
+            createdAt: event.created_at || Math.floor(Date.now() / 1000),
+            createdBy: event.pubkey
+          });
+        }
       } catch (error) {
         console.warn('Invalid group event format:', event);
       }
     }
     
+    console.log(`Processed ${groups.length} valid groups`);
     return groups;
   } catch (error) {
     console.error('Failed to fetch groups:', error);
