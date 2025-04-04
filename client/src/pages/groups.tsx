@@ -5,6 +5,7 @@ import { useGroup } from "../hooks/useGroup";
 import { leaveGroup } from "../services/nip29";
 import { GroupCreator } from "../components/Group/GroupCreator";
 import { GroupList } from "../components/Group/GroupList";
+import { Search } from "lucide-react";
 
 import {
   Card,
@@ -19,6 +20,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { useToast } from "../hooks/use-toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDistanceToNow } from "date-fns";
@@ -38,9 +40,11 @@ export default function GroupsPage() {
 }
 
 function GroupListPage() {
+  const [searchTerm, setSearchTerm] = useState("");
+  
   return (
     <div className="space-y-6">
-      <header className="flex justify-between items-center">
+      <header className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-3xl font-bold">Diet Groups</h1>
           <p className="text-gray-500">
@@ -51,8 +55,19 @@ function GroupListPage() {
           <Link href="/groups/new">Create New Group</Link>
         </Button>
       </header>
+      
+      {/* Global search bar - directly in the page */}
+      <div className="relative mb-6">
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+        <Input 
+          placeholder="Search for groups by name or description..." 
+          className="pl-10 py-6 text-lg"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
 
-      <GroupList />
+      <GroupList initialSearchQuery={searchTerm} />
     </div>
   );
 }

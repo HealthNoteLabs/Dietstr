@@ -20,6 +20,7 @@ import {
 import { usePlatform } from "./hooks/use-mobile";
 import { StatusBar, Style as StatusBarStyle } from '@capacitor/status-bar';
 import { SplashScreen } from '@capacitor/splash-screen';
+import { webSocketService } from "./services/websocket";
 
 // Create a platform context to share platform info with all components
 type PlatformContextType = {
@@ -77,6 +78,18 @@ function App() {
   const platform = usePlatform();
   const [location, setLocation] = useLocation();
   const [appReady, setAppReady] = useState(false);
+  
+  // Initialize WebSocket connection when app starts
+  useEffect(() => {
+    console.log('Initializing WebSocket connection');
+    webSocketService.init();
+    
+    // Cleanup WebSocket connection on unmount
+    return () => {
+      console.log('Disconnecting WebSocket');
+      webSocketService.disconnect();
+    };
+  }, []);
 
   // Setup native app capabilities
   useEffect(() => {

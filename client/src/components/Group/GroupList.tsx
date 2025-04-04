@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { useNostrContext } from "../../contexts/NostrContext";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { NDKEvent } from "@nostr-dev-kit/ndk";
 import debounce from "lodash/debounce";
-import { Search, Filter, X } from "lucide-react";
+import { Search, Filter, X, Wifi } from "lucide-react";
+import { useWebSocket } from "../../hooks/useWebSocket";
 
 import {
   Card,
@@ -32,10 +33,18 @@ import * as nip29 from "../../services/nip29";
 const fetchGroups = nip29.fetchGroups;
 const joinGroup = nip29.joinGroup;
 
-export function GroupList() {
+interface GroupListProps {
+  initialSearchQuery?: string;
+}
+
+export function GroupList({ initialSearchQuery = "" }: GroupListProps) {
   const { ndk, userPubkey } = useNostrContext();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [joiningGroup, setJoiningGroup] = useState<string | null>(null);
+  
+  // Connect to WebSocket for real-time updates
+  const { subscribe, isConnected } = useWebSocket(['group_metadata', 'group_creation', 'group_members']);
 
   // Fetch groups the user is a member of
   const { data: memberGroups, isLoading: loadingMemberships } = useQuery({
@@ -67,7 +76,7 @@ export function GroupList() {
   });
 
   // State for search and filtering
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
   const [dietstrOnly, setDietstrOnly] = useState(false); // Changed to false to see all groups by default
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   
@@ -141,6 +150,46 @@ export function GroupList() {
     return memberGroups?.includes(groupId) || false;
   };
 
+  // Update search query when initialSearchQuery prop changes
+  useEffect(() => {
+    if (initialSearchQuery) {
+      setSearchQuery(initialSearchQuery);
+    }
+  }, [initialSearchQuery]);
+
+  // Handle WebSocket events for real-time updates
+  useEffect(() => {
+    if (!isConnected) return;
+    
+    // Handle group creation events
+    const unsubscribeCreate = subscribe('group_created', (data) => {
+      console.log('New group created via WebSocket:', data);
+      // Invalidate the groups query to refresh the list
+      queryClient.invalidateQueries({ queryKey: ['groups'] });
+    });
+    
+    // Handle group update events
+    const unsubscribeUpdate = subscribe('group_updated', (data) => {
+      console.log('Group updated via WebSocket:', data);
+      // Invalidate the groups query to refresh the list
+      queryClient.invalidateQueries({ queryKey: ['groups'] });
+    });
+    
+    // Handle group members update events
+    const unsubscribeMembers = subscribe('group_members_updated', (data) => {
+      console.log('Group members updated via WebSocket:', data);
+      // Invalidate the membership query
+      queryClient.invalidateQueries({ queryKey: ['group-memberships'] });
+    });
+    
+    // Clean up subscriptions
+    return () => {
+      unsubscribeCreate();
+      unsubscribeUpdate();
+      unsubscribeMembers();
+    };
+  }, [isConnected, subscribe, queryClient]);
+
   useEffect(() => {
     // Print group information for debugging
     if (groups && groups.length > 0) {
@@ -197,6 +246,21 @@ export function GroupList() {
   
   return (
     <div className="space-y-6">
+      {/* WebSocket connection status */}
+      {isConnected ? (
+        <div className="flex items-center gap-2 text-xs text-green-600 mb-1" title="Connected to real-time updates">
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          <Wifi className="h-4 w-4" />
+          <span>Live updates enabled</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-xs text-gray-400 mb-1" title="Disconnected from real-time updates">
+          <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
+          <Wifi className="h-4 w-4" />
+          <span>Offline - Group updates may be delayed</span>
+        </div>
+      )}
+      
       {/* Search bar - Always visible */}
       <div className="mb-6">
         <div className="flex gap-2 mb-4">
@@ -204,6 +268,7 @@ export function GroupList() {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input 
               placeholder="Search groups by name or description..." 
+              defaultValue={initialSearchQuery}
               onChange={handleSearchChange}
               className="pl-10"
             />

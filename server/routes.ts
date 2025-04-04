@@ -26,10 +26,12 @@ export async function registerRoutes(app: Express) {
   
   // Track client subscriptions by client ID
   const subscriptions = new Map<string, NostrSubscription>();
+  let connectionCounter = 0;
   
   wss.on('connection', (ws: WebSocket) => {
     // Create unique ID for this connection
-    const clientId = Math.random().toString(36).substring(2, 15);
+    connectionCounter++;
+    const clientId = `client_${Date.now()}_${connectionCounter}`;
     console.log(`WebSocket client connected: ${clientId}`);
     
     // Store client reference with empty subscriptions
@@ -45,7 +47,10 @@ export async function registerRoutes(app: Express) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
         type: 'connection',
-        message: 'Connected to Dietstr WebSocket server for Nostr relay events'
+        status: 'connected',
+        clientId,
+        timestamp: Date.now(),
+        message: 'Connected to Dietstr WebSocket server'
       }));
     }
     
@@ -58,20 +63,30 @@ export async function registerRoutes(app: Express) {
         // Handle different message types
         if (data.type === 'subscribe') {
           // Subscribe to updates for a specific feed or Nostr event type
-          if (data.feed) {
-            // Store this subscription
+          // Support both single feed and array of feeds
+          const topics = Array.isArray(data.topics) ? data.topics : 
+                        data.feed ? [data.feed] : [];
+                        
+          if (topics.length > 0) {
+            // Store these subscriptions
             const clientSub = subscriptions.get(clientId);
             if (clientSub) {
-              clientSub.topics.push(data.feed);
+              // Add new topics avoiding duplicates
+              topics.forEach(topic => {
+                if (!clientSub.topics.includes(topic)) {
+                  clientSub.topics.push(topic);
+                }
+              });
               subscriptions.set(clientId, clientSub);
             }
             
             ws.send(JSON.stringify({
               type: 'subscribed',
-              feed: data.feed
+              topics,
+              timestamp: Date.now()
             }));
             
-            console.log(`Client ${clientId} subscribed to ${data.feed} feed`);
+            console.log(`Client ${clientId} subscribed to topics: ${topics.join(', ')}`);
           }
         } else if (data.type === 'nostr_event') {
           // Client is relaying a Nostr event they received directly from a relay
@@ -126,6 +141,44 @@ export async function registerRoutes(app: Express) {
       }
     }
     
+    // Handle NIP-29 Group Events
+    if (event.kind === 39000) {
+      // Group metadata event
+      topic = 'group_metadata';
+      console.log('Received group metadata event (kind 39000):', JSON.stringify(event, null, 2));
+      
+      // Extract group info from tags
+      let groupName = '';
+      let groupAbout = '';
+      let groupImage = '';
+      
+      if (event.tags) {
+        for (const tag of event.tags) {
+          if (tag[0] === 'name' && tag[1]) {
+            groupName = tag[1];
+          } else if (tag[0] === 'about' && tag[1]) {
+            groupAbout = tag[1];
+          } else if (tag[0] === 'image' && tag[1]) {
+            groupImage = tag[1];
+          }
+        }
+      }
+      
+      console.log(`Group info - Name: "${groupName}", About: "${groupAbout}", Image: ${groupImage ? 'Yes' : 'No'}`);
+    } else if (event.kind === 9021) {
+      // Group member list event
+      topic = 'group_members';
+      console.log('Received group member event (kind 9021):', JSON.stringify(event, null, 2));
+      
+      // Count members in the list
+      const memberCount = event.tags ? event.tags.filter((t: string[]) => t[0] === 'p').length : 0;
+      console.log(`Group has ${memberCount} members`);
+    } else if (event.kind === 9020) {
+      // Group creation event
+      topic = 'group_creation';
+      console.log('Received group creation event (kind 9020):', JSON.stringify(event, null, 2));
+    }
+    
     // Get the source client ID
     const sourceClientId = (sourceWs as any).clientId;
     
@@ -136,9 +189,20 @@ export async function registerRoutes(app: Express) {
         
         // Check if this client is subscribed to this topic
         const subscription = subscriptions.get(clientId);
-        if (subscription && subscription.topics.includes(topic)) {
+        if (subscription && (subscription.topics.includes(topic) || subscription.topics.includes('all'))) {
+          // Determine message type based on the event kind and topic
+          let messageType = 'new_post';
+          
+          if (topic === 'group_metadata') {
+            messageType = 'group_updated';
+          } else if (topic === 'group_members') {
+            messageType = 'group_members_updated';
+          } else if (topic === 'group_creation') {
+            messageType = 'group_created';
+          }
+          
           client.send(JSON.stringify({
-            type: 'new_post',
+            type: messageType,
             feed: topic,
             data: event
           }));

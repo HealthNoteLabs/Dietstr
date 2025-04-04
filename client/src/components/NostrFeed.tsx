@@ -3,10 +3,11 @@ import NDK, { NDKEvent } from '@nostr-dev-kit/ndk';
 import { ndk, initializeNostr, formatNostrContent, extractImageUrls, getUserPubkey } from '../utils/nostr';
 import { NostrContext } from '../contexts/NostrContext';
 import { useAuth } from '../hooks/useAuth';
+import { useWebSocket } from '../hooks/useWebSocket';
 import { Button } from './ui/button';
 import { Avatar } from './ui/avatar';
 import { Card } from './ui/card';
-import { Loader2, MessageSquare, Heart, Repeat, Zap } from 'lucide-react';
+import { Loader2, MessageSquare, Heart, Repeat, Zap, Wifi } from 'lucide-react';
 
 // Define the Nostr window interface to fix TypeScript errors
 declare global {
@@ -411,69 +412,50 @@ export const NostrFeed: React.FC = () => {
     };
   }, [fetchFoodPosts, page, initialLoadComplete]);
   
-  // Connect to WebSocket server for real-time updates from other clients
+  // Connect to WebSocket service for real-time updates
+  const { subscribe, sendNostrEvent, isConnected } = useWebSocket(['food_posts', 'nostr_events']);
+  
+  // Handle real-time events from WebSocket
   useEffect(() => {
-    // Create WebSocket connection
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    const socket = new WebSocket(wsUrl);
+    if (!isConnected) return;
     
-    // Connection opened
-    socket.addEventListener('open', (event) => {
-      console.log('Connected to WebSocket server for Nostr relay event sharing');
+    console.log('Setting up WebSocket handlers for Nostr feed events');
+    
+    // Handle new posts coming in via WebSocket
+    const unsubscribeNewPost = subscribe('new_post', (data) => {
+      console.log('New Nostr post received via WebSocket:', data);
       
-      // Subscribe to food-related feed updates
-      socket.send(JSON.stringify({
-        type: 'subscribe',
-        feed: 'food'
-      }));
-    });
-    
-    // Listen for messages
-    socket.addEventListener('message', (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log('WebSocket message received:', data);
+      // Convert the raw Nostr event into our post format
+      if (data && data.kind === 1) { // Only process kind 1 (text notes)
+        // Create an NDK event from the raw data for consistent processing
+        const ndkEvent = new NDKEvent(ndk);
+        Object.assign(ndkEvent, data);
         
-        // Handle different message types
-        if (data.type === 'new_post' && data.feed === 'food') {
-          // Process and add the new post to our feed
-          console.log('New Nostr post received from another client:', data.data);
-          
-          // Convert the raw Nostr event into our post format
-          if (data.data && data.data.kind === 1) { // Only process kind 1 (text notes)
-            // Create an NDK event from the raw data for consistent processing
-            const ndkEvent = new NDKEvent(ndk);
-            Object.assign(ndkEvent, data.data);
-            
-            // Process the event into a post and add it to our feed
-            processBasicPostData([ndkEvent])
-              .then(processedPosts => {
-                if (processedPosts.length > 0) {
-                  setPosts(currentPosts => {
-                    // Check if we already have this post
-                    if (currentPosts.some(p => p.id === processedPosts[0].id)) {
-                      return currentPosts; // Skip if duplicate
-                    }
-                    // Add new post at the top
-                    return [processedPosts[0], ...currentPosts];
-                  });
+        // Process the event into a post and add it to our feed
+        processBasicPostData([ndkEvent])
+          .then(processedPosts => {
+            if (processedPosts.length > 0) {
+              setPosts(currentPosts => {
+                // Check if we already have this post
+                if (currentPosts.some(p => p.id === processedPosts[0].id)) {
+                  return currentPosts; // Skip if duplicate
                 }
-              })
-              .catch(err => {
-                console.error('Error processing new post from WebSocket:', err);
+                // Add new post at the top
+                return [processedPosts[0], ...currentPosts];
               });
-          }
-        }
-      } catch (error) {
-        console.error('Error processing WebSocket message:', error);
+            }
+          })
+          .catch(err => {
+            console.error('Error processing new post from WebSocket:', err);
+          });
       }
     });
     
     // Create an event subscription to relay relevant Nostr events to other clients
+    let subscription: any = null;
     if (ndk) {
       // Relay food-related events that we receive directly from Nostr relays
-      const subscription = ndk.subscribe(
+      subscription = ndk.subscribe(
         { kinds: [1], "#t": DIET_HASHTAGS },
         { closeOnEose: false } // Keep subscription open
       );
@@ -485,26 +467,21 @@ export const NostrFeed: React.FC = () => {
           DIET_HASHTAGS.includes(tag[1])
         );
         
-        if (hasDietTag && socket.readyState === WebSocket.OPEN) {
+        if (hasDietTag && isConnected) {
           // Relay this event to our server for distribution to other clients
-          socket.send(JSON.stringify({
-            type: 'nostr_event',
-            event: event.rawEvent()
-          }));
+          sendNostrEvent(event.rawEvent());
         }
       });
     }
     
-    // Listen for errors
-    socket.addEventListener('error', (event) => {
-      console.error('WebSocket error:', event);
-    });
-    
-    // Clean up on unmount
+    // Clean up the subscriptions when the component unmounts
     return () => {
-      socket.close();
+      unsubscribeNewPost();
+      if (subscription) {
+        subscription.stop();
+      }
     };
-  }, [processBasicPostData]);
+  }, [ndk, processBasicPostData, subscribe, sendNostrEvent, isConnected]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -761,7 +738,26 @@ export const NostrFeed: React.FC = () => {
 
   return (
     <div className="w-full max-w-3xl mx-auto py-6 px-4 sm:px-6 space-y-6">
-      <h1 className="text-2xl font-bold text-center mb-6">Diet & Nutrition Posts</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Diet & Nutrition Posts</h1>
+        
+        {/* WebSocket connection status */}
+        {isConnected ? (
+          <div className="flex items-center gap-2 text-xs text-green-600" title="Connected to real-time updates">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <Wifi className="h-4 w-4" />
+            <span className="hidden sm:inline">Live updates</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-gray-400" title="Disconnected from real-time updates">
+            <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
+            <Wifi className="h-4 w-4" />
+            <span className="hidden sm:inline">Offline</span>
+          </div>
+        )}
+      </div>
+      
+      <div className="mb-6"></div>
       
       {loading && page === 1 && (
         <div className="flex justify-center items-center py-10">
