@@ -7,31 +7,44 @@ let ndk: NDK;
  * Initialize the Nostr Development Kit
  * Sets up relays and connects
  */
+let initializationPromise: Promise<typeof ndk> | null = null;
+
 export const initializeNostr = async () => {
-  if (ndk) {
+  // If already initialized, return the NDK instance
+  if (ndk && ndk.pool?.relays?.size > 0) {
     return ndk;
   }
-
-  try {
-    // Create a new NDK instance with commonly used Nostr relays
-    ndk = new NDK({
-      explicitRelayUrls: [
-        'wss://relay.damus.io',
-        'wss://relay.snort.social',
-        'wss://nos.lol',
-        'wss://relay.current.fyi',
-        'wss://relay.nostr.band'
-      ]
-    });
-
-    // Connect to the relays - this is how we access the decentralized Nostr protocol
-    await ndk.connect();
-    console.log('Connected to Nostr relays');
-    return ndk;
-  } catch (error) {
-    console.error('Failed to connect to Nostr relays:', error);
-    throw error;
+  
+  // If initialization is in progress, wait for it to complete
+  if (initializationPromise) {
+    return initializationPromise;
   }
+
+  // Start initialization
+  initializationPromise = (async () => {
+    try {
+      // Create a new NDK instance with commonly used Nostr relays
+      // Using fewer relays to reduce network traffic and permission prompts
+      ndk = new NDK({
+        explicitRelayUrls: [
+          'wss://relay.damus.io',
+          'wss://relay.snort.social',
+          'wss://nos.lol'
+        ]
+      });
+
+      // Connect to the relays - this is how we access the decentralized Nostr protocol
+      await ndk.connect();
+      console.log('Connected to Nostr relays');
+      return ndk;
+    } catch (error) {
+      console.error('Failed to connect to Nostr relays:', error);
+      initializationPromise = null; // Reset so we can try again
+      throw error;
+    }
+  })();
+  
+  return initializationPromise;
 };
 
 // Export the NDK instance

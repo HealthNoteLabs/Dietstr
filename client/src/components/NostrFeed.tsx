@@ -296,34 +296,67 @@ export const NostrFeed: React.FC = () => {
 
   const fetchFoodPosts = useCallback(async () => {
     try {
+      console.log('Fetching diet and nutrition posts for page', page);
       setLoading(true);
       setError(null);
       
-      // Only initialize connection to Nostr relays if not already done
+      // Initialize connection to Nostr relays (uses cache if already connected)
+      await initializeNostr();
+
       if (!ndk) {
-        await initializeNostr();
+        throw new Error('Could not connect to Nostr relays');
       }
-
-      // Use a smaller batch size to reduce browser extension prompts
-      const limit = 10;
-      // For pagination, we get older posts based on the current page
-      const since = page > 1 ? Date.now() - (page * 7 * 24 * 60 * 60 * 1000) : undefined;
-  
-      // Query Nostr relays for posts with diet-related hashtags
-      // This uses the NDK library to search across multiple relays
-      console.log('Querying Nostr relays for diet and nutrition posts...');
-      const foodPosts = await ndk.fetchEvents({
-        kinds: [1],  // Regular notes (kind 1 in Nostr protocol)
-        limit,
-        since,
-        "#t": DIET_HASHTAGS  // Filter by our diet hashtags (t stands for tags in Nostr)
-      });
-
-      // Sort posts by creation time (newer first)
-      const postsArray = Array.from(foodPosts).sort((a, b) => b.created_at - a.created_at);
       
-      if (postsArray.length < limit) {
+      console.log('Relay connection ready, fetching posts...');
+      
+      // Calculate the time window based on page number
+      // For older pages, we look further back in time
+      const limitPerPage = 10;
+      
+      // For pagination: first page gets recent posts, subsequent pages get older posts
+      // This avoids continuous permission prompts when scrolling
+      const filter: { 
+        kinds: number[]; 
+        "#t": string[]; 
+        limit: number;
+        since?: number;
+        until?: number;
+      } = {
+        kinds: [1],  // Regular notes (kind 1 in Nostr protocol)
+        "#t": DIET_HASHTAGS,  // Filter by our diet hashtags (t stands for tags in Nostr)
+        limit: limitPerPage
+      };
+      
+      // Add time constraints based on page number
+      if (page > 1) {
+        // For page 2+, look at older posts (30 days per page number)
+        const daysBack = page * 30;
+        filter.since = Math.floor(Date.now() / 1000) - (daysBack * 24 * 60 * 60);
+        filter.until = Math.floor(Date.now() / 1000) - ((daysBack - 30) * 24 * 60 * 60);
+      } else {
+        // For page 1, just get recent posts (last 30 days)
+        filter.since = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
+      }
+      
+      console.log('Querying Nostr relays with filter:', filter);
+      
+      // Execute the query
+      const foodPosts = await ndk.fetchEvents(filter);
+      const postsArray = Array.from(foodPosts);
+      
+      console.log(`Received ${postsArray.length} posts from Nostr relays`);
+      
+      if (postsArray.length < limitPerPage) {
+        console.log('No more posts available, disabling infinite scroll');
         setHasMore(false);
+      }
+      
+      if (postsArray.length === 0) {
+        if (page === 1) {
+          setError('No diet and nutrition posts found. Try again later or post some yourself!');
+        }
+        setLoading(false);
+        return;
       }
       
       // Process the posts to extract relevant information
