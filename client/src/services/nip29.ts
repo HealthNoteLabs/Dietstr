@@ -2,19 +2,44 @@ import NDK, { NDKEvent, NDKFilter, NDKSubscription } from '@nostr-dev-kit/ndk';
 
 /**
  * Event kinds used for groups according to NIP-29
+ * 
+ * NIP-29 defines the following event kinds:
+ * 39000 - Group metadata
+ * 39001 - Group admin metadata
+ * 39002 - User metadata for group
+ * 39003 - Relay metadata for group
+ * 9000 - Admin adds user
+ * 9001 - Admin removes user
+ * 9020 - Admin message
+ * 9021 - User joins group
+ * 9022 - User leaves group
+ * 30000-30009 - (Reserved)
+ * 30078 - Application-specific (custom event)
  */
 export const GROUP_EVENT_KINDS = {
   GROUP_DEFINITION: 39000, // Group definition event (metadata, etc.)
-  GROUP_MEMBER: 9021,     // Membership claim event
-  GROUP_ADMIN: 9020,      // Group admin event
-  GROUP_POST: 1           // Standard note used for group posts (filtered by e tag)
+  GROUP_MEMBER: 9021,      // Membership claim event
+  GROUP_ADMIN: 9020,       // Group admin event
+  GROUP_POST: 1            // Standard note used for group posts (filtered by e tag)
 };
 
-// Additional Nostr event kinds related to NIP-29
+// Comprehensive list of NIP-29 event kinds - include all possible ones
 export const NIP29_EVENT_KINDS = {
-  GROUP_METADATA: 39000,  // Group metadata
-  GROUP_LIST: 39001,      // List of groups a user is in
-  OTHER_GROUP_KINDS: [39002, 39003], // Other group-related kinds
+  // Metadata events (39xxx)
+  GROUP_METADATA: 39000,   // Group metadata
+  ADMIN_METADATA: 39001,   // Group admin metadata
+  USER_METADATA: 39002,    // User metadata
+  RELAY_METADATA: 39003,   // Relay metadata
+  
+  // Moderation events (9xxx)
+  ADD_USER: 9000,          // Admin adds user
+  REMOVE_USER: 9001,       // Admin removes user
+  ADMIN_MESSAGE: 9020,     // Admin message
+  JOIN_GROUP: 9021,        // User joins group
+  LEAVE_GROUP: 9022,       // User leaves group
+  
+  // All group-related event kinds in a single array (for filtering)
+  ALL_GROUP_KINDS: [39000, 39001, 39002, 39003, 9000, 9001, 9020, 9021, 9022]
 };
 
 /**
@@ -68,12 +93,18 @@ export async function createGroup(
   try {
     // Create a new event for the group definition
     const event = new NDKEvent(ndk);
-    event.kind = GROUP_EVENT_KINDS.GROUP_DEFINITION;
-    event.content = JSON.stringify({
+    event.kind = GROUP_EVENT_KINDS.GROUP_DEFINITION; // 39000
+    
+    // Create content with the group metadata
+    const content = {
       name: params.name,
       about: params.about,
-      picture: params.picture
-    });
+      picture: params.picture || null
+    };
+    event.content = JSON.stringify(content);
+    
+    // Add required NIP29 tags
+    event.tags.push(['d', 'metadata']); // Required NIP29 d-tag
     
     // Add tags for discoverability
     event.tags.push(['t', 'dietstr']); // Main app tag
@@ -91,30 +122,42 @@ export async function createGroup(
       event.tags.push(['t', 'weightloss']);
     }
 
-    // Sign and publish the event
+    // Log the event we're about to publish
+    console.log('Creating group with event:', {
+      kind: event.kind,
+      content: event.content,
+      tags: event.tags
+    });
+
+    // Sign and publish the event to all connected relays
     await event.publish();
+    console.log(`Group definition event published with ID: ${event.id}`);
     
     // Now create the admin membership event (creator is automatically admin)
     const adminEvent = new NDKEvent(ndk);
-    adminEvent.kind = GROUP_EVENT_KINDS.GROUP_ADMIN;
+    adminEvent.kind = GROUP_EVENT_KINDS.GROUP_ADMIN; // 9020
     adminEvent.tags = [
       ['e', event.id, '', 'root'],  // Tag the group event
-      ['role', 'admin']             // Specify role as admin
+      ['role', 'admin'],            // Specify role as admin
+      ['p', event.pubkey]           // Tag the pubkey (often required)
     ];
     adminEvent.content = '';
     await adminEvent.publish();
+    console.log(`Admin membership event published with ID: ${adminEvent.id}`);
     
     // Also create a regular membership event for better compatibility
     const memberEvent = new NDKEvent(ndk);
-    memberEvent.kind = GROUP_EVENT_KINDS.GROUP_MEMBER;
+    memberEvent.kind = GROUP_EVENT_KINDS.GROUP_MEMBER; // 9021
     memberEvent.tags = [
       ['e', event.id, '', 'root'],  // Tag the group event
-      ['role', 'member']            // Specify role as member
+      ['role', 'member'],           // Specify role as member
+      ['p', event.pubkey]           // Tag the pubkey (often required)
     ];
     memberEvent.content = '';
     await memberEvent.publish();
+    console.log(`Member event published with ID: ${memberEvent.id}`);
 
-    console.log(`Group created with ID: ${event.id} and published to relays`);
+    console.log(`Group created with ID: ${event.id} and published to all connected relays`);
 
     // Return the group info
     return {
@@ -158,19 +201,34 @@ export async function fetchGroups(
 ): Promise<GroupInfo[]> {
   try {
     console.log('Fetching groups from Nostr relays...');
+    console.log('Connected relays:', ndk.pool?.relays?.size || 0);
     
-    // Build the filter based on options
+    // Log connected relay URLs for debugging
+    if (ndk.pool?.relays?.size) {
+      console.log('Connected relay list:');
+      ndk.pool.relays.forEach((relay, url) => {
+        console.log(`- ${url} (${relay.status})`);
+      });
+    }
+    
+    // Use multiple event kinds for the search to find all possible NIP-29 groups
+    // This is important as different clients might publish different event kinds
     const filter: NDKFilter = {
-      kinds: [NIP29_EVENT_KINDS.GROUP_METADATA], // Use the NIP29 specific kind
-      // Use a very broad time range to find all groups (3 years)
-      // Since we're not using "until", we'll get everything until now
-      since: Math.floor(Date.now() / 1000) - 3 * 365 * 24 * 60 * 60, // 3 years ago
-      limit: 500, // Set a higher limit to get more groups
+      kinds: [
+        NIP29_EVENT_KINDS.GROUP_METADATA,    // Most common group metadata (39000)
+        NIP29_EVENT_KINDS.ADMIN_METADATA,    // Admin metadata (39001)
+        // We'll also look for membership events as a fallback since they might reference groups
+        NIP29_EVENT_KINDS.JOIN_GROUP,        // Join events (9021)
+        NIP29_EVENT_KINDS.ADMIN_MESSAGE      // Admin messages (9020)
+      ],
+      // Use a very broad time range to find all groups (5 years to be extra permissive)
+      since: Math.floor(Date.now() / 1000) - 5 * 365 * 24 * 60 * 60, // 5 years ago
+      limit: 1000, // Increased limit to get more groups
     };
     
     // Log more information for debugging
     console.log("Searching for groups with time range starting from:", 
-      new Date((Math.floor(Date.now() / 1000) - 3 * 365 * 24 * 60 * 60) * 1000).toISOString());
+      new Date((Math.floor(Date.now() / 1000) - 5 * 365 * 24 * 60 * 60) * 1000).toISOString());
     
     // Filter by tags if specified but only if user explicitly requests filtering
     if (options.tags && options.tags.length > 0) {
@@ -180,22 +238,64 @@ export async function fetchGroups(
       filter['#t'] = ['dietstr', 'diet', 'nutrition'];
     }
     
-    // For debugging, show all groups
+    // For debugging, we'll show ALL groups with no tag filtering
     if (!options.tags && !options.onlyDietstr) {
       // Remove any tag filtering to show ALL groups
       delete filter['#t'];
     }
     
+    // Also get any events with Dietstr-related tags
+    const filterWithDietTags: NDKFilter = {
+      ...filter,
+      '#t': ['dietstr', 'diet', 'nutrition', 'keto', 'vegan', 'food']
+    };
+    
     console.log('Group search filter:', filter);
-    const events = await ndk.fetchEvents(filter, { closeOnEose: false });
-    console.log(`Received ${events.size} group events from relays`);
-    if (events.size === 0) {
+    
+    // First try with standard filter
+    const events = await ndk.fetchEvents(filter, { 
+      closeOnEose: false,
+      // Explicitly include the Nostr relays we want to query
+      relayUrls: [
+        'wss://relay.damus.io',
+        'wss://relay.nostr.band', 
+        'wss://nos.lol',
+        'wss://relay.current.fyi',
+        'wss://relay.snort.social',
+        'wss://relay.0xchat.com',
+        'wss://nostr.wine'
+      ]
+    });
+    
+    // Also try with diet-specific tags as a separate search
+    const eventsWithTags = await ndk.fetchEvents(filterWithDietTags, { 
+      closeOnEose: false,
+      // Query again with diet tags
+      relayUrls: [
+        'wss://relay.damus.io',
+        'wss://relay.nostr.band', 
+        'wss://nos.lol',
+        'wss://relay.current.fyi',
+        'wss://relay.snort.social',
+        'wss://relay.0xchat.com',
+        'wss://nostr.wine'
+      ]
+    });
+    
+    // Combine both result sets (will deduplicate by event ID)
+    const allEvents = new Set<NDKEvent>();
+    events.forEach(event => allEvents.add(event));
+    eventsWithTags.forEach(event => allEvents.add(event));
+    
+    console.log(`Received ${allEvents.size} group events from relays (${events.size} from main search, ${eventsWithTags.size} with diet tags)`);
+    
+    if (allEvents.size === 0) {
       console.log("No group events were returned by the relays. Possible issues:");
       console.log("1. You may not be connected to the right relays for NIP-29 groups");
       console.log("2. The time range might be too short or the relays might not have events that old");
       console.log("3. The 'kind' parameter might not be set correctly for these relays");
     } else {
-      console.log("Event sample:", Array.from(events)[0]);
+      console.log("Event sample:", Array.from(allEvents)[0]);
     }
     
     const groups: GroupInfo[] = [];
@@ -212,7 +312,7 @@ export async function fetchGroups(
     };
     
     // Process events to extract group information
-    for (const event of events) {
+    for (const event of allEvents) {
       try {
         // Parse group content - handle both JSON and plain text
         let content;
@@ -235,6 +335,11 @@ export async function fetchGroups(
             createdAt: event.created_at || Math.floor(Date.now() / 1000),
             createdBy: event.pubkey
           };
+          
+          // For debugging, log the relay this event came from if available
+          if (event._relays && event._relays.length > 0) {
+            console.log(`Found group "${group.name}" from relay: ${event._relays[0]}`);
+          }
           
           // Check if group matches search query
           if (!options.search || matchesSearch(group, options.search)) {
