@@ -10,6 +10,13 @@ export const GROUP_EVENT_KINDS = {
   GROUP_POST: 1           // Standard note used for group posts (filtered by e tag)
 };
 
+// Additional Nostr event kinds related to NIP-29
+export const NIP29_EVENT_KINDS = {
+  GROUP_METADATA: 39000,  // Group metadata
+  GROUP_LIST: 39001,      // List of groups a user is in
+  OTHER_GROUP_KINDS: [39002, 39003], // Other group-related kinds
+};
+
 /**
  * Interface for group information
  */
@@ -154,25 +161,30 @@ export async function fetchGroups(
     
     // Build the filter based on options
     const filter: NDKFilter = {
-      kinds: [GROUP_EVENT_KINDS.GROUP_DEFINITION],
-      // Use a much broader time range to find all groups
-      since: Math.floor(Date.now() / 1000) - 365 * 24 * 60 * 60, // 1 year ago
+      kinds: [NIP29_EVENT_KINDS.GROUP_METADATA], // Use the NIP29 specific kind
+      // Use a very broad time range to find all groups (3 years)
+      // Since we're not using "until", we'll get everything until now
+      since: Math.floor(Date.now() / 1000) - 3 * 365 * 24 * 60 * 60, // 3 years ago
+      limit: 500, // Set a higher limit to get more groups
     };
     
     // Log more information for debugging
     console.log("Searching for groups with time range starting from:", 
-      new Date((Math.floor(Date.now() / 1000) - 365 * 24 * 60 * 60) * 1000).toISOString());
+      new Date((Math.floor(Date.now() / 1000) - 3 * 365 * 24 * 60 * 60) * 1000).toISOString());
     
-    // Filter by tags if specified
+    // Filter by tags if specified but only if user explicitly requests filtering
     if (options.tags && options.tags.length > 0) {
       filter['#t'] = options.tags;
-    } else if (options.onlyDietstr) {
+    } else if (options.onlyDietstr && options.onlyDietstr === true) {
       // If no specific tags but only want Dietstr groups
       filter['#t'] = ['dietstr', 'diet', 'nutrition'];
     }
     
-    // Temporary: Remove tag filtering to see all groups for testing
-    delete filter['#t'];
+    // For debugging, show all groups
+    if (!options.tags && !options.onlyDietstr) {
+      // Remove any tag filtering to show ALL groups
+      delete filter['#t'];
+    }
     
     console.log('Group search filter:', filter);
     const events = await ndk.fetchEvents(filter, { closeOnEose: false });
