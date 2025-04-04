@@ -6,8 +6,10 @@ import { Toaster } from "@/components/ui/toaster";
 import Dashboard from "@/pages/dashboard";
 import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
+import GroupsPage from "./pages/groups";
 import { NostrProvider } from "./contexts/NostrContext";
 import { NostrFeed } from "./components/NostrFeed";
+import { Navigation } from "./components/Navigation";
 import { 
   isNativeApp, 
   isAndroid, 
@@ -64,6 +66,8 @@ function Router() {
       <Route path="/" component={Login} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/feed" component={NostrFeed} />
+      <Route path="/groups" component={GroupsPage} />
+      <Route path="/groups/:rest*" component={GroupsPage} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -142,7 +146,10 @@ function App() {
             {/* Show app content when ready, could add a loading spinner here */}
             {appReady && (
               <>
-                <Router />
+                <Navigation />
+                <div className="pt-4">
+                  <Router />
+                </div>
                 <Toaster />
               </>
             )}

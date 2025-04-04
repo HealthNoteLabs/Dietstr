@@ -1,0 +1,1132 @@
+# Practical Implementation Guide for NIP29 (Groups) in Dietstr
+
+This guide provides a practical, step-by-step approach to implementing Nostr NIP29 group functionality in the Dietstr application. Unlike the theoretical report, this focuses on actionable code examples and implementation details.
+
+## 1. Understanding NIP29 Basics
+
+NIP29 allows Nostr users to create and join groups with features like:
+- Closed membership
+- Group-specific content
+- Role-based permissions
+- Timeline references for context
+
+### Key NIP29 Event Kinds
+
+```
+Group Management Events:
+- 9000: Add user to group
+- 9001: Remove user from group
+- 9021: Join request
+- 9022: Leave group
+
+Metadata Events:
+- 39000: Group metadata
+- 39001: Group admin list
+- 39002: Add user to role
+- 39003: Remove user from role
+```
+
+## 2. Setting Up the Project Structure
+
+```
+/dietstr
+├── /src
+│   ├── /components
+│   │   ├── /Group
+│   │   │   ├── GroupCreator.jsx
+│   │   │   ├── GroupList.jsx
+│   │   │   ├── GroupDetail.jsx
+│   │   │   ├── MembersList.jsx
+│   │   │   └── JoinRequestForm.jsx
+│   ├── /services
+│   │   ├── /nostr
+│   │   │   ├── index.js
+│   │   │   ├── nip29.js      # Group-specific functions
+│   │   │   └── relay.js
+│   ├── /hooks
+│   │   └── useGroup.js       # Custom hook for group operations
+│   ├── /contexts
+│   │   └── GroupContext.jsx  # React context for group state
+```
+
+## 3. Core Implementation
+
+### Step 1: Connect to Group-Compatible Relays
+
+```javascript
+// src/services/nostr/relay.js
+import { SimplePool } from 'nostr-tools';
+
+// Choose relays that support NIP29
+const GROUP_RELAYS = [
+  'wss://groups.nostr.com',
+  'wss://relay.dietstr.com',
+  'wss://nos.lol'
+];
+
+export const pool = new SimplePool();
+
+export function connectToRelays() {
+  return GROUP_RELAYS.map(relay => pool.ensureRelay(relay));
+}
+
+// Close connections when done
+export function disconnectFromRelays() {
+  pool.close(GROUP_RELAYS);
+}
+```
+
+### Step 2: Create NIP29 Group Management Functions
+
+```javascript
+// src/services/nostr/nip29.js
+import { getEventHash, signEvent } from 'nostr-tools';
+import { pool } from './relay';
+
+// Helper to generate proper NIP29 group ID
+export function createGroupId(relayUrl, randomId) {
+  const host = new URL(relayUrl).hostname;
+  return `${host}'${randomId}`;
+}
+
+// Create a new group
+export async function createGroup(name, about, privateKey) {
+  const relayUrl = 'wss://groups.nostr.com'; // Primary relay
+  const randomId = generateRandomString(8);
+  const groupId = createGroupId(relayUrl, randomId);
+  
+  const event = {
+    kind: 39000, // Group metadata event
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['d', randomId],
+      ['name', name],
+      ['about', about],
+      ['h', groupId]
+    ],
+    content: ''
+  };
+  
+  // Sign the event with creator's key
+  event.pubkey = getPublicKey(privateKey);
+  event.id = getEventHash(event);
+  event.sig = signEvent(event, privateKey);
+  
+  // Publish to relays
+  await pool.publish(relayUrl, event);
+  return groupId;
+}
+
+// Request to join a group
+export async function requestToJoinGroup(groupId, privateKey, inviteCode = null) {
+  const event = {
+    kind: 9021, // Join request event
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['h', groupId]
+    ],
+    content: 'Request to join the group'
+  };
+  
+  // Add invite code if provided
+  if (inviteCode) {
+    event.tags.push(['code', inviteCode]);
+  }
+  
+  // Get the last few events from the group to add timeline references
+  const timelineRefs = await getTimelineReferences(groupId);
+  if (timelineRefs.length > 0) {
+    timelineRefs.forEach(ref => {
+      event.tags.push(['e', ref]);
+    });
+  }
+  
+  // Sign and publish
+  event.pubkey = getPublicKey(privateKey);
+  event.id = getEventHash(event);
+  event.sig = signEvent(event, privateKey);
+  
+  const relayUrl = getRelayFromGroupId(groupId);
+  await pool.publish(relayUrl, event);
+  return event;
+}
+
+// Get timeline references (important for NIP29 context)
+async function getTimelineReferences(groupId) {
+  const relayUrl = getRelayFromGroupId(groupId);
+  const events = await pool.list([relayUrl], [{
+    kinds: [1, 9000, 9001, 9021, 9022],
+    '#h': [groupId],
+    limit: 50
+  }]);
+  
+  // Sort by created_at (newest first)
+  events.sort((a, b) => b.created_at - a.created_at);
+  
+  // Return IDs of up to 3 recent events
+  return events.slice(0, 3).map(event => event.id);
+}
+
+// Extract relay from group ID
+function getRelayFromGroupId(groupId) {
+  const [host] = groupId.split("'");
+  return `wss://${host}`;
+}
+
+// Generate random string for group IDs
+function generateRandomString(length) {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789-_';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+```
+
+### Step 3: Create a React Hook for Group Operations
+
+```javascript
+// src/hooks/useGroup.js
+import { useState, useEffect, useCallback } from 'react';
+import { pool } from '../services/nostr/relay';
+import * as nip29 from '../services/nostr/nip29';
+
+export function useGroup(groupId) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [groupInfo, setGroupInfo] = useState(null);
+  const [members, setMembers] = useState([]);
+  const [currentUserRole, setCurrentUserRole] = useState(null);
+  
+  // Fetch group metadata
+  const fetchGroupInfo = useCallback(async () => {
+    try {
+      setLoading(true);
+      const relayUrl = nip29.getRelayFromGroupId(groupId);
+      
+      // Fetch group metadata (kind 39000)
+      const metadataEvents = await pool.list([relayUrl], [{
+        kinds: [39000],
+        '#h': [groupId],
+        limit: 1
+      }]);
+      
+      if (metadataEvents.length === 0) {
+        throw new Error('Group not found');
+      }
+      
+      const metadata = metadataEvents[0];
+      const name = metadata.tags.find(t => t[0] === 'name')?.[1] || 'Unnamed Group';
+      const about = metadata.tags.find(t => t[0] === 'about')?.[1] || '';
+      
+      setGroupInfo({
+        id: groupId,
+        name,
+        about,
+        createdAt: metadata.created_at,
+        createdBy: metadata.pubkey
+      });
+      
+      // Fetch member list
+      fetchMembers();
+    } catch (err) {
+      console.error('Error fetching group info:', err);
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [groupId]);
+  
+  // Fetch group members
+  const fetchMembers = useCallback(async () => {
+    try {
+      const relayUrl = nip29.getRelayFromGroupId(groupId);
+      
+      // Fetch add user events (kind 9000)
+      const memberEvents = await pool.list([relayUrl], [{
+        kinds: [9000],
+        '#h': [groupId]
+      }]);
+      
+      // Fetch remove user events (kind 9001)
+      const removeEvents = await pool.list([relayUrl], [{
+        kinds: [9001],
+        '#h': [groupId]
+      }]);
+      
+      // Process membership (remove users that were later removed)
+      const currentMembers = new Map();
+      
+      memberEvents.forEach(event => {
+        const targetPubkey = event.tags.find(t => t[0] === 'p')?.[1];
+        if (targetPubkey) {
+          currentMembers.set(targetPubkey, {
+            pubkey: targetPubkey,
+            addedAt: event.created_at,
+            addedBy: event.pubkey
+          });
+        }
+      });
+      
+      removeEvents.forEach(event => {
+        const targetPubkey = event.tags.find(t => t[0] === 'p')?.[1];
+        if (targetPubkey && currentMembers.has(targetPubkey)) {
+          currentMembers.delete(targetPubkey);
+        }
+      });
+      
+      setMembers(Array.from(currentMembers.values()));
+      
+      // Check the current user's role
+      checkUserRole();
+    } catch (err) {
+      console.error('Error fetching members:', err);
+    }
+  }, [groupId]);
+  
+  // Check current user's role in the group
+  const checkUserRole = useCallback(async () => {
+    if (!window.nostr) return;
+    
+    try {
+      const userPubkey = await window.nostr.getPublicKey();
+      const relayUrl = nip29.getRelayFromGroupId(groupId);
+      
+      // Check if user is admin
+      const adminEvents = await pool.list([relayUrl], [{
+        kinds: [39001],
+        '#h': [groupId]
+      }]);
+      
+      if (adminEvents.length > 0) {
+        const isAdmin = adminEvents[0].tags
+          .some(t => t[0] === 'p' && t[1] === userPubkey);
+        
+        if (isAdmin) {
+          setCurrentUserRole('admin');
+          return;
+        }
+      }
+      
+      // Check if user is a member
+      const isMember = members.some(m => m.pubkey === userPubkey);
+      if (isMember) {
+        setCurrentUserRole('member');
+      } else {
+        setCurrentUserRole(null);
+      }
+    } catch (err) {
+      console.error('Error checking user role:', err);
+    }
+  }, [groupId, members]);
+  
+  // Join a group (requests to join)
+  const requestJoin = useCallback(async (inviteCode = null) => {
+    if (!window.nostr) {
+      throw new Error('Please login to join groups');
+    }
+    
+    try {
+      const privateKey = await window.nostr.getSigningKey();
+      await nip29.requestToJoinGroup(groupId, privateKey, inviteCode);
+      return true;
+    } catch (err) {
+      console.error('Error requesting to join group:', err);
+      throw err;
+    }
+  }, [groupId]);
+  
+  // Leave a group
+  const leaveGroup = useCallback(async () => {
+    if (!window.nostr) {
+      throw new Error('Please login to leave groups');
+    }
+    
+    try {
+      const privateKey = await window.nostr.getSigningKey();
+      const event = {
+        kind: 9022, // Leave group event
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [['h', groupId]],
+        content: 'Leaving group'
+      };
+      
+      const timelineRefs = await nip29.getTimelineReferences(groupId);
+      if (timelineRefs.length > 0) {
+        timelineRefs.forEach(ref => {
+          event.tags.push(['e', ref]);
+        });
+      }
+      
+      event.pubkey = await window.nostr.getPublicKey();
+      event.id = getEventHash(event);
+      event.sig = await window.nostr.signEvent(event);
+      
+      const relayUrl = nip29.getRelayFromGroupId(groupId);
+      await pool.publish(relayUrl, event);
+      
+      setCurrentUserRole(null);
+      return true;
+    } catch (err) {
+      console.error('Error leaving group:', err);
+      throw err;
+    }
+  }, [groupId]);
+  
+  // Initialize
+  useEffect(() => {
+    if (groupId) {
+      fetchGroupInfo();
+    }
+    
+    // Set up subscription for real-time updates
+    const relayUrl = nip29.getRelayFromGroupId(groupId);
+    const sub = pool.sub([relayUrl], [{
+      '#h': [groupId],
+      kinds: [9000, 9001, 9021, 9022, 39000, 39001]
+    }]);
+    
+    sub.on('event', (event) => {
+      // Handle different event types
+      if (event.kind === 9000 || event.kind === 9001) {
+        fetchMembers(); // Refresh members on add/remove
+      } else if (event.kind === 39000) {
+        fetchGroupInfo(); // Refresh metadata
+      }
+    });
+    
+    return () => {
+      sub.unsub();
+    };
+  }, [groupId, fetchGroupInfo, fetchMembers]);
+  
+  return {
+    loading,
+    error,
+    groupInfo,
+    members,
+    currentUserRole,
+    requestJoin,
+    leaveGroup,
+    refreshGroup: fetchGroupInfo
+  };
+}
+```
+
+### Step 4: Create Group UI Components
+
+```jsx
+// src/components/Group/GroupCreator.jsx
+import React, { useState } from 'react';
+import { createGroup } from '../../services/nostr/nip29';
+
+export default function GroupCreator() {
+  const [name, setName] = useState('');
+  const [about, setAbout] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+  const [groupId, setGroupId] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setCreating(true);
+    setError(null);
+    
+    try {
+      if (!window.nostr) {
+        throw new Error('Please login to create a group');
+      }
+      
+      // Get the signing key via NIP-07
+      const privateKey = await window.nostr.getSigningKey();
+      
+      // Create the group
+      const newGroupId = await createGroup(name, about, privateKey);
+      
+      setSuccess(true);
+      setGroupId(newGroupId);
+    } catch (err) {
+      console.error('Error creating group:', err);
+      setError(err.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="group-creator">
+      <h2>Create Diet Community</h2>
+      
+      {success ? (
+        <div className="success-message">
+          <p>Your diet community was created successfully!</p>
+          <p>Group ID: <strong>{groupId}</strong></p>
+          <button onClick={() => window.location.href = `/group/${encodeURIComponent(groupId)}`}>
+            Go to Group
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label htmlFor="name">Community Name</label>
+            <input
+              type="text"
+              id="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              placeholder="e.g., Carnivore Diet Community"
+            />
+          </div>
+          
+          <div className="form-group">
+            <label htmlFor="about">Description</label>
+            <textarea
+              id="about"
+              value={about}
+              onChange={(e) => setAbout(e.target.value)}
+              placeholder="What's this community about?"
+              rows={4}
+            />
+          </div>
+          
+          {error && <div className="error-message">{error}</div>}
+          
+          <button 
+            type="submit" 
+            disabled={creating || !name.trim()}
+            className="primary-button"
+          >
+            {creating ? 'Creating...' : 'Create Community'}
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+```
+
+```jsx
+// src/components/Group/GroupDetail.jsx
+import React, { useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { useGroup } from '../../hooks/useGroup';
+import MembersList from './MembersList';
+import JoinRequestForm from './JoinRequestForm';
+
+export default function GroupDetail() {
+  const { groupId } = useParams();
+  const {
+    loading,
+    error,
+    groupInfo,
+    members,
+    currentUserRole,
+    requestJoin,
+    leaveGroup
+  } = useGroup(groupId);
+  
+  const [postContent, setPostContent] = useState('');
+  const [postingTo, setPostingTo] = useState('group'); // 'group' or 'public'
+  
+  const handlePost = async () => {
+    if (!postContent.trim() || !window.nostr) {
+      alert('Please enter content and login to post');
+      return;
+    }
+    
+    try {
+      // Create Nostr event for group post
+      const event = {
+        kind: 1, // Text note
+        created_at: Math.floor(Date.now() / 1000),
+        content: postContent,
+        tags: [
+          ['h', groupId],
+          ['t', 'Dietstr'], // Add Dietstr tag
+        ]
+      };
+      
+      // Add relevant diet tags based on group type
+      if (groupInfo.name.toLowerCase().includes('carnivore')) {
+        event.tags.push(['t', 'Carnivore']);
+      } else if (groupInfo.name.toLowerCase().includes('fasting')) {
+        event.tags.push(['t', 'Fasting']);
+      } else if (groupInfo.name.toLowerCase().includes('hydration')) {
+        event.tags.push(['t', 'Hydration']);
+      }
+      
+      // If posting publicly, add food-related tags
+      if (postingTo === 'public') {
+        event.tags.push(['t', 'Foodstr']);
+        event.tags.push(['t', 'Food']);
+        event.tags.push(['t', 'Diet']);
+      }
+      
+      // Sign event using NIP-07
+      event.id = await window.nostr.getEventHash(event);
+      event.sig = await window.nostr.signEvent(event);
+      
+      // Publish to relays
+      await pool.publish(nip29.getRelayFromGroupId(groupId), event);
+      
+      // Clear form after posting
+      setPostContent('');
+      alert('Posted successfully!');
+    } catch (err) {
+      console.error('Error posting:', err);
+      alert('Failed to post: ' + err.message);
+    }
+  };
+  
+  if (loading) return <div className="loading">Loading group...</div>;
+  if (error) return <div className="error">{error}</div>;
+  if (!groupInfo) return <div className="not-found">Group not found</div>;
+  
+  return (
+    <div className="group-detail">
+      <div className="group-header">
+        <h1>{groupInfo.name}</h1>
+        <p className="group-about">{groupInfo.about}</p>
+        <div className="group-meta">
+          <span>Created {new Date(groupInfo.createdAt * 1000).toLocaleDateString()}</span>
+          <span>{members.length} members</span>
+        </div>
+      </div>
+      
+      {currentUserRole ? (
+        <div className="member-actions">
+          <div className="role-badge">{currentUserRole === 'admin' ? 'Admin' : 'Member'}</div>
+          
+          <div className="post-form">
+            <textarea
+              value={postContent}
+              onChange={(e) => setPostContent(e.target.value)}
+              placeholder="Share something with the group..."
+              rows={4}
+            />
+            
+            <div className="post-options">
+              <label>
+                <input
+                  type="radio"
+                  name="postingTo"
+                  value="group"
+                  checked={postingTo === 'group'}
+                  onChange={() => setPostingTo('group')}
+                />
+                Post to group only
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="postingTo"
+                  value="public"
+                  checked={postingTo === 'public'}
+                  onChange={() => setPostingTo('public')}
+                />
+                Post to group and public feed
+              </label>
+            </div>
+            
+            <button onClick={handlePost}>Post</button>
+          </div>
+          
+          <button onClick={leaveGroup} className="leave-button">
+            Leave Group
+          </button>
+        </div>
+      ) : (
+        <JoinRequestForm groupId={groupId} onJoinRequest={requestJoin} />
+      )}
+      
+      <MembersList members={members} isAdmin={currentUserRole === 'admin'} groupId={groupId} />
+    </div>
+  );
+}
+```
+
+### Step 5: Implement Group Feed Component
+
+```jsx
+// src/components/Group/GroupFeed.jsx
+import React, { useState, useEffect } from 'react';
+import { pool } from '../../services/nostr/relay';
+import { getPublicKey } from 'nostr-tools';
+
+export default function GroupFeed({ groupId }) {
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [profiles, setProfiles] = useState({});
+  
+  useEffect(() => {
+    // Fetch group posts
+    const fetchPosts = async () => {
+      try {
+        setLoading(true);
+        const relayUrl = getRelayFromGroupId(groupId);
+        
+        // Get group posts (kind 1 with 'h' tag)
+        const events = await pool.list([relayUrl], [{
+          kinds: [1],
+          '#h': [groupId],
+          limit: 100
+        }]);
+        
+        // Sort by created_at (newest first)
+        events.sort((a, b) => b.created_at - a.created_at);
+        
+        // Extract unique pubkeys for profile fetching
+        const pubkeys = [...new Set(events.map(event => event.pubkey))];
+        
+        // Fetch profiles
+        const profileEvents = await pool.list([relayUrl], [{
+          kinds: [0],
+          authors: pubkeys
+        }]);
+        
+        // Process profiles
+        const profileData = {};
+        profileEvents.forEach(event => {
+          try {
+            const content = JSON.parse(event.content);
+            profileData[event.pubkey] = {
+              name: content.name || 'Anonymous',
+              picture: content.picture || '',
+              about: content.about || ''
+            };
+          } catch (err) {
+            console.error('Error parsing profile:', err);
+          }
+        });
+        
+        setProfiles(profileData);
+        setPosts(events);
+      } catch (err) {
+        console.error('Error fetching group posts:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchPosts();
+    
+    // Subscribe to new posts
+    const relayUrl = getRelayFromGroupId(groupId);
+    const sub = pool.sub([relayUrl], [{
+      kinds: [1],
+      '#h': [groupId]
+    }]);
+    
+    sub.on('event', (event) => {
+      // Add new post to state
+      setPosts(prev => {
+        // Check if we already have this post
+        if (prev.some(p => p.id === event.id)) {
+          return prev;
+        }
+        
+        // Add new post and sort
+        return [event, ...prev].sort((a, b) => b.created_at - a.created_at);
+      });
+      
+      // Fetch profile if needed
+      if (!profiles[event.pubkey]) {
+        fetchProfile(event.pubkey, relayUrl);
+      }
+    });
+    
+    return () => {
+      sub.unsub();
+    };
+  }, [groupId]);
+  
+  const fetchProfile = async (pubkey, relayUrl) => {
+    try {
+      const profileEvents = await pool.list([relayUrl], [{
+        kinds: [0],
+        authors: [pubkey]
+      }]);
+      
+      if (profileEvents.length > 0) {
+        try {
+          const content = JSON.parse(profileEvents[0].content);
+          setProfiles(prev => ({
+            ...prev,
+            [pubkey]: {
+              name: content.name || 'Anonymous',
+              picture: content.picture || '',
+              about: content.about || ''
+            }
+          }));
+        } catch (err) {
+          console.error('Error parsing profile:', err);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching profile:', err);
+    }
+  };
+  
+  const extractTags = (event) => {
+    return event.tags
+      .filter(tag => tag[0] === 't')
+      .map(tag => tag[1]);
+  };
+  
+  // Helper to extract images from content
+  const extractImages = (content) => {
+    const urlRegex = /(https?:\/\/[^\s]+\.(?:jpg|jpeg|png|gif|webp))/gi;
+    return content.match(urlRegex) || [];
+  };
+  
+  // Function to get relay from group ID
+  function getRelayFromGroupId(groupId) {
+    const [host] = groupId.split("'");
+    return `wss://${host}`;
+  }
+  
+  return (
+    <div className="group-feed">
+      <h2>Group Posts</h2>
+      
+      {loading ? (
+        <div className="loading">Loading posts...</div>
+      ) : posts.length === 0 ? (
+        <div className="empty-feed">No posts in this group yet. Be the first to post!</div>
+      ) : (
+        <div className="posts-container">
+          {posts.map(post => (
+            <div key={post.id} className="post-card">
+              <div className="post-header">
+                <img 
+                  src={profiles[post.pubkey]?.picture || '/default-avatar.png'} 
+                  alt="User" 
+                  className="user-avatar"
+                />
+                <div>
+                  <h3>{profiles[post.pubkey]?.name || 'Anonymous'}</h3>
+                  <span className="timestamp">
+                    {new Date(post.created_at * 1000).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="post-content">
+                <p>{post.content}</p>
+                
+                <div className="post-images">
+                  {extractImages(post.content).map((img, index) => (
+                    <img 
+                      key={index} 
+                      src={img} 
+                      alt="Post attachment" 
+                      className="post-image"
+                    />
+                  ))}
+                </div>
+                
+                <div className="post-tags">
+                  {extractTags(post).map(tag => (
+                    <span key={tag} className="tag">#{tag}</span>
+                  ))}
+                </div>
+              </div>
+              
+              <div className="post-actions">
+                <button>❤️ Like</button>
+                <button>💬 Comment</button>
+                <button>⚡ Zap</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## 4. Advanced NIP29 Features
+
+### Handling Timeline References
+
+Timeline references are crucial for NIP29 groups to maintain context:
+
+```javascript
+// Function to get timeline references for a post
+async function getTimelineReferences(groupId) {
+  try {
+    const relayUrl = getRelayFromGroupId(groupId);
+    
+    // Fetch recent events in the group
+    const events = await pool.list([relayUrl], [{
+      '#h': [groupId],
+      kinds: [1, 9000, 9001, 9021, 9022],
+      limit: 50
+    }]);
+    
+    // Sort by creation time (newest first)
+    events.sort((a, b) => b.created_at - a.created_at);
+    
+    // Take 3-5 recent events for timeline references
+    return events.slice(0, 3).map(e => e.id);
+  } catch (err) {
+    console.error('Error getting timeline references:', err);
+    return [];
+  }
+}
+
+// Example usage when creating a post
+async function createGroupPost(groupId, content, privateKey) {
+  // Get timeline references
+  const timelineRefs = await getTimelineReferences(groupId);
+  
+  // Create the event
+  const event = {
+    kind: 1,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['h', groupId]
+    ],
+    content
+  };
+  
+  // Add timeline refs to prevent out-of-context posting
+  timelineRefs.forEach(ref => {
+    event.tags.push(['e', ref]);
+  });
+  
+  // Sign and publish
+  // ...
+}
+```
+
+### Admin Functions for Group Management
+
+```javascript
+// Add a user to a group (admin function)
+export async function addUserToGroup(groupId, targetPubkey, privateKey) {
+  if (!isGroupAdmin(groupId, getPublicKey(privateKey))) {
+    throw new Error('Only admins can add users to a group');
+  }
+  
+  const timelineRefs = await getTimelineReferences(groupId);
+  
+  const event = {
+    kind: 9000, // Add user event
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['h', groupId],
+      ['p', targetPubkey]
+    ],
+    content: ''
+  };
+  
+  // Add timeline references
+  timelineRefs.forEach(ref => {
+    event.tags.push(['e', ref]);
+  });
+  
+  // Sign and publish
+  event.pubkey = getPublicKey(privateKey);
+  event.id = getEventHash(event);
+  event.sig = signEvent(event, privateKey);
+  
+  const relayUrl = getRelayFromGroupId(groupId);
+  await pool.publish(relayUrl, event);
+  return event;
+}
+
+// Check if a user is an admin of the group
+async function isGroupAdmin(groupId, pubkey) {
+  const relayUrl = getRelayFromGroupId(groupId);
+  
+  // Fetch admin list event
+  const adminEvents = await pool.list([relayUrl], [{
+    kinds: [39001], // Group admin list
+    '#h': [groupId]
+  }]);
+  
+  if (adminEvents.length === 0) {
+    return false;
+  }
+  
+  // Check if pubkey is in the admin list
+  const adminEvent = adminEvents[0];
+  return adminEvent.tags.some(tag => tag[0] === 'p' && tag[1] === pubkey);
+}
+```
+
+## 5. Integrating Groups with Diet Challenges
+
+For Dietstr-specific functionality, implement integration with the challenge system:
+
+```javascript
+// Create a challenge-specific group
+export async function createChallengeGroup(challengeType, privateKey) {
+  // Generate appropriate name and description based on challenge type
+  let name, about;
+  
+  switch (challengeType) {
+    case 'carnivore':
+      name = 'Carnivore Challenge Group';
+      about = 'A community for Carnivore Diet challenge participants to share experiences and support each other.';
+      break;
+    case 'fasting':
+      name = 'Fasting Challenge Group';
+      about = 'Join others on intermittent fasting journeys. Share tips, progress, and support each other.';
+      break;
+    case 'water':
+      name = 'Hydration Challenge Group';
+      about = 'Stay accountable with your daily water intake goals and track hydration progress together.';
+      break;
+    default:
+      name = 'Diet Challenge Group';
+      about = 'Support group for diet challenge participants.';
+  }
+  
+  // Create the group
+  const groupId = await createGroup(name, about, privateKey);
+  
+  // Add challenge-specific tags
+  const metadataEvent = {
+    kind: 39000,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['h', groupId],
+      ['name', name],
+      ['about', about],
+      ['challenge', challengeType],
+      ['d', groupId.split("'")[1]]
+    ],
+    content: ''
+  };
+  
+  // Sign and publish metadata update
+  metadataEvent.pubkey = getPublicKey(privateKey);
+  metadataEvent.id = getEventHash(metadataEvent);
+  metadataEvent.sig = signEvent(metadataEvent, privateKey);
+  
+  const relayUrl = getRelayFromGroupId(groupId);
+  await pool.publish(relayUrl, metadataEvent);
+  
+  return groupId;
+}
+
+// Share challenge progress to group
+export async function shareProgressToGroup(groupId, challengeType, progress, privateKey) {
+  const content = generateProgressMessage(challengeType, progress);
+  
+  const event = {
+    kind: 1,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['h', groupId],
+      ['t', 'Dietstr'],
+      ['t', challengeType],
+      ['t', 'progress'],
+      ['progress', JSON.stringify(progress)]
+    ],
+    content
+  };
+  
+  // Add timeline references
+  const timelineRefs = await getTimelineReferences(groupId);
+  timelineRefs.forEach(ref => {
+    event.tags.push(['e', ref]);
+  });
+  
+  // Sign and publish
+  event.pubkey = getPublicKey(privateKey);
+  event.id = getEventHash(event);
+  event.sig = signEvent(event, privateKey);
+  
+  const relayUrl = getRelayFromGroupId(groupId);
+  await pool.publish(relayUrl, event);
+  return event;
+}
+
+// Generate a message based on challenge type and progress data
+function generateProgressMessage(challengeType, progress) {
+  switch (challengeType) {
+    case 'carnivore':
+      return `Day ${progress.day} of my Carnivore Challenge! ${progress.description || ''}`;
+    case 'fasting':
+      return `Completed ${progress.hours} hours of fasting! ${progress.description || ''}`;
+    case 'water':
+      return `Drank ${progress.amount}ml of water today. ${progress.description || ''}`;
+    default:
+      return `Updated my diet challenge progress! ${progress.description || ''}`;
+  }
+}
+```
+
+## 6. Integration with Main App
+
+```jsx
+// src/App.jsx
+import React from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Dashboard from './components/Dashboard';
+import Stats from './components/Stats';
+import FoodFeed from './components/FoodFeed';
+import GroupList from './components/Group/GroupList';
+import GroupCreator from './components/Group/GroupCreator';
+import GroupDetail from './components/Group/GroupDetail';
+import Settings from './components/Settings';
+
+function App() {
+  return (
+    <BrowserRouter>
+      <div className="app-container">
+        <nav className="main-nav">
+          <ul>
+            <li><a href="/">Dashboard</a></li>
+            <li><a href="/stats">Stats</a></li>
+            <li><a href="/feed">Feed</a></li>
+            <li><a href="/teams">Teams</a></li>
+            <li><a href="/settings">Settings</a></li>
+          </ul>
+        </nav>
+        
+        <div className="main-content">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/stats" element={<Stats />} />
+            <Route path="/feed" element={<FoodFeed />} />
+            <Route path="/teams" element={<GroupList />} />
+            <Route path="/teams/create" element={<GroupCreator />} />
+            <Route path="/teams/:groupId" element={<GroupDetail />} />
+            <Route path="/settings" element={<Settings />} />
+          </Routes>
+        </div>
+      </div>
+    </BrowserRouter>
+  );
+}
+
+export default App;
+```
+
+## 7. Testing and Verification
+
+To test your NIP29 implementation:
+
+1. Use a NIP29-compatible relay (e.g., wss://groups.nostr.com)
+2. Verify group creation and see if metadata is stored correctly
+3. Test join requests and membership management
+4. Ensure posts include proper timeline references
+5. Verify that posts are only visible to group members
+
+## 8. Deployment on Replit
+
+```bash
+# Replit setup script for Dietstr with NIP29
+
+# Initialize Replit Node.js project
+echo "Setting up Dietstr with NIP29 support..."
+
+# Create
