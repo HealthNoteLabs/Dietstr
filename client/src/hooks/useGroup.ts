@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNostrContext } from '../contexts/NostrContext';
 import { useQuery } from '@tanstack/react-query';
 import { NDKEvent } from '@nostr-dev-kit/ndk';
@@ -56,16 +56,20 @@ export function useGroup(groupId?: string) {
     enabled: !!ndk && !!groupId,
   });
 
-  // Check if current user is a member
-  const isMember = members?.some(member => member.pubkey === userPubkey) || false;
+  // Check if current user is a member (using useMemo for derivation)
+  const isMember = useMemo(() => {
+    return members?.some(member => member.pubkey === userPubkey) || false;
+  }, [members, userPubkey]);
 
-  // Check if user is an admin
-  const isAdmin = members?.some(
-    member => member.pubkey === userPubkey && member.role === 'admin'
-  ) || false;
+  // Check if user is an admin (using useMemo for derivation)
+  const isAdmin = useMemo(() => {
+    return members?.some(
+      member => member.pubkey === userPubkey && member.role === 'admin'
+    ) || false;
+  }, [members, userPubkey]);
 
-  // Post content to the group
-  const postContent = async (content: string) => {
+  // Post content to the group (using useCallback for consistent hook order)
+  const postContent = useCallback(async (content: string) => {
     if (!ndk || !userPubkey || !groupId) {
       toast({
         title: 'Error',
@@ -107,7 +111,7 @@ export function useGroup(groupId?: string) {
     } finally {
       setPosting(false);
     }
-  };
+  }, [ndk, userPubkey, groupId, isMember, toast]);
 
   // Subscribe to new posts in the group
   useEffect(() => {

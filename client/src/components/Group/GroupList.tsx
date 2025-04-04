@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNostrContext } from "../../contexts/NostrContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
@@ -113,8 +113,8 @@ export function GroupList({ initialSearchQuery = "" }: GroupListProps) {
     enabled: !!ndk,
   });
 
-  // Handle joining a group
-  const handleJoinGroup = async (groupId: string) => {
+  // Handle joining a group using useCallback for consistent hook order
+  const handleJoinGroup = React.useCallback(async (groupId: string) => {
     if (!ndk || !userPubkey) {
       toast({
         title: "Error",
@@ -143,12 +143,12 @@ export function GroupList({ initialSearchQuery = "" }: GroupListProps) {
     } finally {
       setJoiningGroup(null);
     }
-  };
+  }, [ndk, userPubkey, toast, refetchGroups]);
 
-  // Check if user is a member of a group
-  const isMember = (groupId: string): boolean => {
+  // Check if user is a member of a group (using useCallback for consistent hook order)
+  const isMember = React.useCallback((groupId: string): boolean => {
     return memberGroups?.includes(groupId) || false;
-  };
+  }, [memberGroups]);
 
   // Update search query when initialSearchQuery prop changes
   useEffect(() => {
@@ -190,6 +190,29 @@ export function GroupList({ initialSearchQuery = "" }: GroupListProps) {
     };
   }, [isConnected, subscribe, queryClient]);
 
+  // Define debounced search handler early in the component
+  // to ensure consistent hook order
+  const debouncedSearch = React.useCallback(
+    debounce((value: string) => {
+      setSearchQuery(value);
+    }, 300),
+    []
+  );
+  
+  // Handle search input change
+  const handleSearchChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    debouncedSearch(e.target.value);
+  }, [debouncedSearch]);
+  
+  // Handle tag selection with useCallback for consistent hook order
+  const handleTagToggle = React.useCallback((tag: string) => {
+    setSelectedTags(prev => 
+      prev.includes(tag) 
+        ? prev.filter(t => t !== tag) 
+        : [...prev, tag]
+    );
+  }, []);
+
   useEffect(() => {
     // Print group information for debugging
     if (groups && groups.length > 0) {
@@ -221,28 +244,6 @@ export function GroupList({ initialSearchQuery = "" }: GroupListProps) {
       </div>
     );
   }
-
-  // Debounced search handler
-  const debouncedSearch = React.useCallback(
-    debounce((value: string) => {
-      setSearchQuery(value);
-    }, 300),
-    []
-  );
-  
-  // Handle search input change
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    debouncedSearch(e.target.value);
-  };
-  
-  // Handle tag selection
-  const handleTagToggle = (tag: string) => {
-    setSelectedTags(prev => 
-      prev.includes(tag) 
-        ? prev.filter(t => t !== tag) 
-        : [...prev, tag]
-    );
-  };
   
   return (
     <div className="space-y-6">
