@@ -155,9 +155,13 @@ export async function fetchGroups(
     // Build the filter based on options
     const filter: NDKFilter = {
       kinds: [GROUP_EVENT_KINDS.GROUP_DEFINITION],
-      // Add a reasonable time range to improve relay search
-      since: Math.floor(Date.now() / 1000) - 90 * 24 * 60 * 60, // 90 days ago
+      // Use a much broader time range to find all groups
+      since: Math.floor(Date.now() / 1000) - 365 * 24 * 60 * 60, // 1 year ago
     };
+    
+    // Log more information for debugging
+    console.log("Searching for groups with time range starting from:", 
+      new Date((Math.floor(Date.now() / 1000) - 365 * 24 * 60 * 60) * 1000).toISOString());
     
     // Filter by tags if specified
     if (options.tags && options.tags.length > 0) {
@@ -166,6 +170,9 @@ export async function fetchGroups(
       // If no specific tags but only want Dietstr groups
       filter['#t'] = ['dietstr', 'diet', 'nutrition'];
     }
+    
+    // Temporary: Remove tag filtering to see all groups for testing
+    delete filter['#t'];
     
     console.log('Group search filter:', filter);
     const events = await ndk.fetchEvents(filter, { closeOnEose: false });

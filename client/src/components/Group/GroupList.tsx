@@ -68,7 +68,7 @@ export function GroupList() {
 
   // State for search and filtering
   const [searchQuery, setSearchQuery] = useState("");
-  const [dietstrOnly, setDietstrOnly] = useState(true);
+  const [dietstrOnly, setDietstrOnly] = useState(false); // Changed to false to see all groups by default
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   
   // Available tags for filtering

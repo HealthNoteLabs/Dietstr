@@ -99,6 +99,16 @@ export async function registerRoutes(app: Express) {
    * Broadcast a Nostr event to all interested WebSocket clients
    */
   function broadcastNostrEvent(event: any, sourceWs: WebSocket) {
+    console.log(`Broadcasting Nostr event: ${JSON.stringify(event, null, 2)}`);
+    
+    // Count active connections
+    let activeConnections = 0;
+    wss.clients.forEach(client => {
+      if (client.readyState === WebSocket.OPEN) {
+        activeConnections++;
+      }
+    });
+    console.log(`Active WebSocket connections: ${activeConnections}`);
     if (!event) return;
     
     // Determine which topic this event belongs to
