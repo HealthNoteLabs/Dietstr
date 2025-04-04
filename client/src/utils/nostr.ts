@@ -30,7 +30,13 @@ export const initializeNostr = async () => {
       ndk = new NDK({
         explicitRelayUrls: [
           'wss://relay.damus.io',
-          'wss://nos.lol'
+          'wss://nos.lol',
+          'wss://relay.nostr.band',
+          'wss://relay.current.fyi',
+          'wss://relay.snort.social',
+          'wss://relay.dietstr.com',
+          'wss://relay.0xchat.com',
+          'wss://nostr.wine'
         ],
         autoConnectUserRelays: false, // Don't auto-connect to user relays
         autoFetchUserMutelist: false  // Don't auto-fetch user mutes

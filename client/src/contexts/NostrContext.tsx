@@ -49,7 +49,10 @@ export const NostrProvider: React.FC<NostrProviderProps> = ({ children }) => {
               'wss://nos.lol',
               'wss://relay.current.fyi',
               'wss://relay.snort.social',
-              'wss://relay.dietstr.com' // Add your specific relay here
+              'wss://relay.dietstr.com',
+              'wss://relay.0xchat.com',
+              'wss://nostr.wine',
+              'wss://relay.damus.io'
             ],
             signer
           });
