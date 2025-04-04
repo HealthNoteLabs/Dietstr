@@ -8,6 +8,8 @@ let ndk: NDK;
  * Sets up relays and connects
  */
 let initializationPromise: Promise<typeof ndk> | null = null;
+let cachedUserPubkey: string | null = null;
+let lastPubkeyFetch = 0;
 
 export const initializeNostr = async () => {
   // If already initialized, return the NDK instance
@@ -23,17 +25,18 @@ export const initializeNostr = async () => {
   // Start initialization
   initializationPromise = (async () => {
     try {
-      // Create a new NDK instance with commonly used Nostr relays
-      // Using fewer relays to reduce network traffic and permission prompts
+      // Create a new NDK instance with Nostr relays, but with auto-connections disabled
+      // to prevent frequent permission prompts
       ndk = new NDK({
         explicitRelayUrls: [
           'wss://relay.damus.io',
-          'wss://relay.snort.social',
           'wss://nos.lol'
-        ]
+        ],
+        autoConnectUserRelays: false, // Don't auto-connect to user relays
+        autoFetchUserMutelist: false  // Don't auto-fetch user mutes
       });
 
-      // Connect to the relays - this is how we access the decentralized Nostr protocol
+      // Connect to the relays manually - this gives us more control
       await ndk.connect();
       console.log('Connected to Nostr relays');
       return ndk;
@@ -47,24 +50,35 @@ export const initializeNostr = async () => {
   return initializationPromise;
 };
 
-// Export the NDK instance
-export { ndk };
-
 /**
- * Get the user's public key from the browser extension
+ * Get the user's public key from the browser extension with caching
+ * This implementation caches the public key to reduce permission prompts
+ * @param forceRefresh Force a refresh of the cached pubkey
  * @returns The user's public key or null if not available
  */
-export const getUserPubkey = async (): Promise<string | null> => {
+export const getUserPubkey = async (forceRefresh = false): Promise<string | null> => {
+  // Check if we have a cached pubkey and it's less than 10 minutes old
+  const now = Date.now();
+  if (!forceRefresh && cachedUserPubkey && (now - lastPubkeyFetch < 10 * 60 * 1000)) {
+    return cachedUserPubkey;
+  }
+  
   try {
     if (window.nostr) {
-      return await window.nostr.getPublicKey();
+      // Only request the pubkey from extension
+      cachedUserPubkey = await window.nostr.getPublicKey();
+      lastPubkeyFetch = now;
+      return cachedUserPubkey;
     }
     return null;
   } catch (error) {
     console.error('Error getting user pubkey:', error);
-    return null;
+    return cachedUserPubkey; // Return last cached value if available
   }
 };
+
+// Export the NDK instance
+export { ndk };
 
 /**
  * Format a Nostr content string to handle mentions, links, and hashtags

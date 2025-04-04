@@ -1,12 +1,23 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 import NDK, { NDKEvent } from '@nostr-dev-kit/ndk';
-import { ndk, initializeNostr, formatNostrContent, extractImageUrls } from '../utils/nostr';
+import { ndk, initializeNostr, formatNostrContent, extractImageUrls, getUserPubkey } from '../utils/nostr';
 import { NostrContext } from '../contexts/NostrContext';
 import { useAuth } from '../hooks/useAuth';
 import { Button } from './ui/button';
 import { Avatar } from './ui/avatar';
 import { Card } from './ui/card';
 import { Loader2, MessageSquare, Heart, Repeat, Zap } from 'lucide-react';
+
+// Define the Nostr window interface to fix TypeScript errors
+declare global {
+  interface Window {
+    nostr?: {
+      getPublicKey(): Promise<string>;
+      signEvent(event: any): Promise<any>;
+      getMetadata?(): Promise<any>;
+    };
+  }
+}
 
 // Define diet-related hashtags for filtering
 const DIET_HASHTAGS = ["Foodstr", "Dietstr", "Food", "Diet", "Carnivore", "Fasting", "Hydration"];
@@ -196,14 +207,8 @@ export const NostrFeed: React.FC = () => {
       })
     );
 
-    let userPubkey = '';
-    try {
-      if (window.nostr) {
-        userPubkey = await window.nostr.getPublicKey();
-      }
-    } catch (err) {
-      console.error('Error getting user pubkey:', err);
-    }
+    // Use our cached function to avoid frequent prompts
+    const userPubkey = await getUserPubkey() || '';
 
     // Process likes
     let likesCount = 0;
@@ -711,7 +716,7 @@ export const NostrFeed: React.FC = () => {
       }
 
       // Add the comment locally
-      const userPubkey = await window.nostr?.getPublicKey();
+      const userPubkey = await getUserPubkey();
       if (!userPubkey) return;
 
       const newComment = {
