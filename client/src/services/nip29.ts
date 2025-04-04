@@ -189,6 +189,14 @@ export async function fetchGroups(
     console.log('Group search filter:', filter);
     const events = await ndk.fetchEvents(filter, { closeOnEose: false });
     console.log(`Received ${events.size} group events from relays`);
+    if (events.size === 0) {
+      console.log("No group events were returned by the relays. Possible issues:");
+      console.log("1. You may not be connected to the right relays for NIP-29 groups");
+      console.log("2. The time range might be too short or the relays might not have events that old");
+      console.log("3. The 'kind' parameter might not be set correctly for these relays");
+    } else {
+      console.log("Event sample:", Array.from(events)[0]);
+    }
     
     const groups: GroupInfo[] = [];
     

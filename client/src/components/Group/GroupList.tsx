@@ -197,71 +197,66 @@ export function GroupList() {
   
   return (
     <div className="space-y-6">
-      {/* Search and filter section */}
-      <Card>
-        <CardContent className="pt-6">
-          <Tabs defaultValue="search" className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="search" className="flex items-center gap-2">
-                <Search className="h-4 w-4" />
-                <span>Search</span>
-              </TabsTrigger>
-              <TabsTrigger value="filter" className="flex items-center gap-2">
-                <Filter className="h-4 w-4" />
-                <span>Filter</span>
-              </TabsTrigger>
-            </TabsList>
+      {/* Search bar - Always visible */}
+      <div className="mb-6">
+        <div className="flex gap-2 mb-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input 
+              placeholder="Search groups by name or description..." 
+              onChange={handleSearchChange}
+              className="pl-10"
+            />
+          </div>
+          <Button 
+            variant="outline" 
+            onClick={() => refetchGroups()}
+            className="flex items-center gap-2"
+          >
+            <Filter className="h-4 w-4" />
+            <span>Filter</span>
+          </Button>
+        </div>
+        
+        {/* Filter options always visible */}
+        <div className="flex flex-wrap gap-4 items-center">
+          <div className="flex items-center space-x-2">
+            <Switch
+              id="diet-only"
+              checked={dietstrOnly}
+              onCheckedChange={setDietstrOnly}
+            />
+            <Label htmlFor="diet-only">Only diet-related groups</Label>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <span className="text-sm">Tags:</span>
+            <div className="flex flex-wrap gap-1">
+              {availableTags.map(tag => (
+                <Badge 
+                  key={tag}
+                  variant={selectedTags.includes(tag) ? "default" : "outline"}
+                  className="cursor-pointer capitalize text-xs"
+                  onClick={() => handleTagToggle(tag)}
+                >
+                  {tag}
+                </Badge>
+              ))}
+            </div>
             
-            <TabsContent value="search" className="mt-4">
-              <div className="space-y-4">
-                <div className="flex items-center space-x-2">
-                  <Input 
-                    placeholder="Search groups..." 
-                    onChange={handleSearchChange}
-                    className="flex-1"
-                  />
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="diet-only"
-                    checked={dietstrOnly}
-                    onCheckedChange={setDietstrOnly}
-                  />
-                  <Label htmlFor="diet-only">Show only diet-related groups</Label>
-                </div>
-              </div>
-            </TabsContent>
-            
-            <TabsContent value="filter" className="mt-4">
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">Filter by tags:</p>
-                <div className="flex flex-wrap gap-2">
-                  {availableTags.map(tag => (
-                    <Badge 
-                      key={tag}
-                      variant={selectedTags.includes(tag) ? "default" : "outline"}
-                      className="cursor-pointer capitalize"
-                      onClick={() => handleTagToggle(tag)}
-                    >
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-                {selectedTags.length > 0 && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="h-8 flex items-center gap-1 text-xs"
-                    onClick={() => setSelectedTags([])}
-                  >
-                    <X className="h-3 w-3" /> Clear tags
-                  </Button>
-                )}
-              </div>
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
+            {selectedTags.length > 0 && (
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-6 flex items-center gap-1 text-xs p-1"
+                onClick={() => setSelectedTags([])}
+              >
+                <X className="h-3 w-3" /> Clear
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
       
       {/* Groups display */}
       {groups && groups.length > 0 ? (
