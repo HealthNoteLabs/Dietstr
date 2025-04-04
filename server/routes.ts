@@ -2,7 +2,14 @@ import type { Express } from "express";
 import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
-import { insertUserSchema, insertFoodEntrySchema, insertWaterEntrySchema } from "@shared/schema";
+import { 
+  insertUserSchema, 
+  insertFoodEntrySchema, 
+  insertWaterEntrySchema, 
+  insertGroupSchema,
+  insertGroupMemberSchema,
+  insertGroupInviteSchema
+} from "@shared/schema";
 
 // Interface for tracking Nostr relay subscriptions
 interface NostrSubscription {
@@ -201,6 +208,97 @@ export async function registerRoutes(app: Express) {
       res.json(entry);
     } catch (error) {
       res.status(400).json({ error: "Invalid water entry data" });
+    }
+  });
+
+  // Group endpoints
+  app.get("/api/groups", async (req, res) => {
+    try {
+      const groups = await storage.getGroups();
+      res.json(groups);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch groups" });
+    }
+  });
+
+  app.post("/api/groups", async (req, res) => {
+    try {
+      const groupData = insertGroupSchema.parse(req.body);
+      const group = await storage.createGroup(groupData);
+      
+      // Broadcast update to connected clients
+      broadcastUpdate('group_created', group);
+      
+      res.json(group);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid group data" });
+    }
+  });
+
+  app.get("/api/groups/:id", async (req, res) => {
+    try {
+      const groupId = parseInt(req.params.id);
+      const group = await storage.getGroupById(groupId);
+      if (!group) {
+        return res.status(404).json({ error: "Group not found" });
+      }
+      res.json(group);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch group" });
+    }
+  });
+
+  app.get("/api/groups/:id/members", async (req, res) => {
+    try {
+      const groupId = parseInt(req.params.id);
+      const members = await storage.getGroupMembers(groupId);
+      res.json(members);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch group members" });
+    }
+  });
+
+  app.post("/api/groups/:id/members", async (req, res) => {
+    try {
+      const groupId = parseInt(req.params.id);
+      const memberData = insertGroupMemberSchema.parse({
+        ...req.body,
+        groupId
+      });
+      const member = await storage.addGroupMember(memberData);
+      
+      // Broadcast update to connected clients
+      broadcastUpdate('member_added', { groupId, member });
+      
+      res.json(member);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid member data" });
+    }
+  });
+
+  app.post("/api/groups/:id/invites", async (req, res) => {
+    try {
+      const groupId = parseInt(req.params.id);
+      const inviteData = insertGroupInviteSchema.parse({
+        ...req.body,
+        groupId
+      });
+      const invite = await storage.createGroupInvite(inviteData);
+      res.json(invite);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid invite data" });
+    }
+  });
+
+  app.get("/api/invites/:code", async (req, res) => {
+    try {
+      const invite = await storage.getGroupInviteByCode(req.params.code);
+      if (!invite) {
+        return res.status(404).json({ error: "Invite not found or expired" });
+      }
+      res.json(invite);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch invite" });
     }
   });
 
