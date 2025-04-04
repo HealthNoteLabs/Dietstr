@@ -1,9 +1,65 @@
 import type { Express } from "express";
 import { createServer } from "http";
+import { WebSocketServer, WebSocket } from "ws";
 import { storage } from "./storage";
 import { insertUserSchema, insertFoodEntrySchema, insertWaterEntrySchema } from "@shared/schema";
 
 export async function registerRoutes(app: Express) {
+  // Create HTTP server
+  const httpServer = createServer(app);
+  
+  // Create WebSocket server for real-time updates
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  
+  wss.on('connection', (ws: WebSocket) => {
+    console.log('WebSocket client connected');
+    
+    // Send welcome message
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'connection',
+        message: 'Connected to Dietstr WebSocket server'
+      }));
+    }
+    
+    // Handle incoming messages
+    ws.on('message', (message: string) => {
+      try {
+        const data = JSON.parse(message);
+        console.log('Received WebSocket message:', data);
+        
+        // Handle different message types
+        if (data.type === 'subscribe') {
+          // Subscribe to updates for a specific feed or user
+          if (data.feed) {
+            ws.send(JSON.stringify({
+              type: 'subscribed',
+              feed: data.feed
+            }));
+          }
+        }
+      } catch (error) {
+        console.error('Error processing WebSocket message:', error);
+      }
+    });
+    
+    // Handle disconnection
+    ws.on('close', () => {
+      console.log('WebSocket client disconnected');
+    });
+  });
+  
+  // Function to broadcast updates to all connected clients
+  const broadcastUpdate = (type: string, data: any) => {
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify({
+          type,
+          data
+        }));
+      }
+    });
+  };
   app.post("/api/users", async (req, res) => {
     try {
       const userData = insertUserSchema.parse(req.body);
@@ -67,5 +123,5 @@ export async function registerRoutes(app: Express) {
     }
   });
 
-  return createServer(app);
+  return httpServer;
 }

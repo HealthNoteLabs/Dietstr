@@ -1,0 +1,764 @@
+This report delineates an in-depth roadmap for integrating NIP29, the relay-based group protocol for Nostr, within the Dietstr application—a diet and nutrition tracking platform with extensive social features. The integration is carried out on Replit and leverages a stack including TypeScript, React (with Vite), Express.js, and the nostr-tools library. The purpose of this report is to provide a detailed explanation of the architecture, code-level considerations, and potential innovative approaches not initially anticipated.
+
+---
+
+## 1. Introduction
+
+Dietstr, being a sophisticated diet and nutrition tracking app, already features Nostr-based authentication and social interactions. With the growing need for group-based interactions, the app now requires the integration of NIP29— a standard for creating relay-based, closed groups on the Nostr network. This report addresses how to implement the NIP29 specification in Dietstr, ensuring that users can create, join, and manage groups defined by unique random identifiers with proper authorization, role-based access, and metadata management.
+
+---
+
+## 2. Overview of NIP29
+
+NIP29 is designed to handle relay-based groups by providing the following key features:
+
+- Group Identifier: Groups are identified using a formatted string: `<host>'<group-id>` (e.g., `groups.nostr.com'abcdef`). The allowed characters include a–z, 0–9, `-`, and `_` to avoid collisions.
+- Mandatory h Tag: All events sent by users must include an `h` tag bearing the group id.
+- Event Types: The protocol defines several types of events:
+    - _Join Requests (kind:9021)_
+    - _Leave Requests (kind:9022)_
+    - _Moderation Events (kinds:9000-9020)_
+    - _Metadata Events (kinds:39000-39003)_
+- Timeline References: Events reference previous events (using the first 8 characters of event IDs) to maintain context and prevent out-of-context message broadcasts.
+- Relay-Generated Events: These are signed by the relay keypair and include group metadata and the administrative structure.
+- Group Management: Includes mechanisms to add roles, update group membership, and even manage unmanaged groups that transition to managed groups.
+
+The additional complexity comes from decentralized administration, role-based authorization, and a robust audit trail maintained by sequential events.
+
+---
+
+## 3. Integration Architecture in Dietstr
+
+### 3.1. Full-Stack Considerations
+
+The Dietstr application utilizes a full-stack architecture:
+
+- Frontend: React (with Vite) written in TypeScript. It manages user interactions, the visualization of group-related data, and the dynamic update of UI based on real-time group events.
+- Backend: An Express.js server (server/index.ts) that acts as an API gateway for the app, orchestrating business logic, error handling, and relay communication using nostr-tools.
+- Nostr Integration: The app relies on an integrated use of nostr-tools, specifically the SimplePool, for managing multi-relay communications. This aids in publishing and subscribing to NIP29 events effectively.
+
+### 3.2. Replit Environment Adaptation
+
+When deploying on Replit, take note of the following considerations:
+
+- File Structure: Ensure that the file structure accommodates both a client (React app) and a server (Express backend). Use Replit's environment configuration to serve the static build of the React app and dynamically handle WebSocket connections for relay communication.
+- Environment Variables: Securely store keys, relay endpoints, and the Nostr keypair in Replit's Secrets to ensure no sensitive information is exposed in the codebase.
+- Resource Constraints: Given the potential resource limitations on Replit, consider throttling long-running connections and optimizing the use of nostr-tools for safety and performance.
+
+---
+
+## 4. Detailed Implementation Steps
+
+### 4.1. Backend Implementation (Express.js)
+
+#### 4.1.1. Express Middleware and Routes
+
+- Static File Serving: Configure middleware to serve your React application’s build folder.
+    
+- API Routes: Create endpoints for group actions such as join, leave, and group metadata retrieval. These endpoints will validate NIP29 event requests and forward them to the appropriate relay endpoints.
+    
+- Error Handling: Use a centralized error middleware, as per best practices in Express. Implement custom error types for operational errors (e.g., group membership issues) and programmer errors. Refer to our structured logging practices using Winston or Morgan.
+    
+
+Example Code Snippet for Middleware:
+
+```
+// server/middleware/errorHandler.ts
+import { Request, Response, NextFunction } from 'express';
+
+export function errorHandler(err: any, req: Request, res: Response, next: NextFunction) {
+  // Log the error details
+  console.error(err);
+  res.status(err.status || 500).json({
+    error: err.message || 'Internal Server Error'
+  });
+}
+```
+
+#### 4.1.2. NIP29 Event Creation and Relay Communication
+
+- Using nostr-tools: Utilize the SimplePool for subscribing to relay events related to groups. Wrap the creation of events such as join (kind:9021) and leave (kind:9022) in helper functions that also perform signing and validation.
+    
+- Relay Communication: Design endpoints that push events to relays over WebSocket. Maintain a graceful connection for sending timely updates, especially for moderation or administrative events.
+    
+
+Example Code for Relay Event Publishing:
+
+```
+import { SimplePool, finishEvent } from 'nostr-tools';
+
+const pool = new SimplePool();
+const relayUrl = 'wss://groups.nostr.com';
+
+async function publishJoinEvent(groupId: string, pubkey: string, optionalInvite?: string) {
+  const event = {
+    kind: 9021,
+    content: 'Requesting to join group',
+    tags: [ ['h', groupId] ]
+  };
+
+  // Optionally add invite code
+  if (optionalInvite) {
+    event.tags.push(['code', optionalInvite]);
+  }
+
+  // Sign and finalize the event using nostr-tools
+  const signedEvent = finishEvent(event, '<private-key>');
+  await pool.publish(relayUrl, signedEvent);
+  return signedEvent;
+}
+```
+
+#### 4.1.3. Group State and Metadata Management
+
+- Relay-Generated Metadata: For group metadata (kind:39000) and group admins (kind:39001), implement endpoints to fetch and validate the signed events from relays. The backend should periodically query the relay using nostr-tools to reconstruct the current state of the group.
+- Role-based Permissions: Utilize middleware functions to validate if a pubkey attempts group state changes such as user additions (kind:9000) or removals (kind:9001). In the case of unauthorized requests, provide immediate feedback with a standardized error response.
+
+### 4.2. Frontend Implementation (React)
+
+#### 4.2.1. UI Components and State Management
+
+- Group Creation/Join UI: Develop components that allow users to request joining a group, display group metadata, and show a dynamic list of current members. Use React Query to synchronize group state with backend data.
+    
+- Event Handling: Wire up event listeners that listen for real-time updates from the relay using WebSockets. Display notifications (with Tailwind CSS + Shadcn UI components) when group events occur, such as successful joins or moderation actions.
+    
+
+#### 4.2.2. Sample Prompt for Replit Deployment
+
+Below is a prompt you can copy-paste into a Replit shell to bootstrap your project:
+
+```
+# Clone the repository (if not already present)
+git clone https://github.com/yourusername/dietstr.git
+cd dietstr
+
+# Install frontend and backend dependencies
+npm install
+
+# Setup environment variables (adjust as needed)
+echo "REACT_APP_RELAY_ENDPOINT=wss://groups.nostr.com" >> .env
+
+echo "NODE_ENV=development" >> .env
+
+# Start the backend (Express server)
+npm run start-server
+
+# In another terminal, start the frontend
+nnpm run start-client
+```
+
+You can further modify this script to include additional deployment configurations that suit Replit's environment.
+
+### 4.3. Integrating nostr-tools with NIP29 Logic
+
+- Advanced Usage of SimplePool: The recent updates in nostr-tools (see nip29.ts enhancements as of Dec 17, 2024) offer refined support for group functionalities, particularly regarding admin permission and timeline reference enforcement.
+    
+- Timeline Reference Feature: When constructing group events, integrate the logic to fetch the last 50 events from the appropriate relay and include at least 3 timeline references. This is essential to meet the NIP29 requirements and prevent context misuse.
+    
+- Extending the SimplePool: Consider writing custom wrappers around SimplePool for automated timeline reference fetching, event signing, and error logging. This abstraction will reduce redundancy and make it easier to incorporate future changes in the NIP29 specification.
+    
+
+---
+
+## 5. Advanced Considerations and Future Directions
+
+### 5.1. Leveraging Contrarian Ideas
+
+- Decoupled Group Management: While the current plan integrates group management directly into the Dietstr flow, consider an alternative microservice architecture where group management is handled by a specialized service. This would allow independent scaling and modular updates, particularly useful if additional group functionalities are planned.
+    
+- Automated Role Discovery: Instead of hardcoding specific administrative roles, implement a dynamic role discovery mechanism. This can be built using machine learning to analyze group interactions over time and propose role adjustments—though this is speculative, it could become a competitive unique feature.
+    
+- Enhanced Security Mechanisms: Explore integrating blockchain-based identity verification alongside NIP29 events. Although unconventional, such an approach might provide an extra layer of trust for sensitive group data, particularly in health and nutrition tracking applications.
+    
+
+### 5.2. Extensible Group Metadata
+
+- Real-time Collaboration: Consider implementing a decentralized real-time editor for group discussions. Though NIP29 outlines basic communication protocols, extending these features to support collaborative document editing or live chat can increase user engagement.
+    
+- Analytics and Monitoring: Integrate centralized logging and error-monitoring tools (e.g., ELK stack, Loggly) to track group event flows. Detailed analytics can help identify bottlenecks in the group creation and management process.
+    
+- Migration Tools for Unmanaged Groups: Develop utilities to migrate unmanaged groups into managed groups seamlessly, allowing for a gradual rollout of enhanced security and administrative controls without disrupting existing user interactions.
+    
+
+### 5.3. Proactive Error Handling and Experience
+
+- Structured Logging: Maintain comprehensive logs of events processed per group to facilitate debugging and traceability. Coupling Winston or Morgan with custom error classes ensures that all group events maintain clean transactional logs.
+    
+- User Feedback Loops: Implement mechanisms (e.g., toast notifications, modal confirmations) that not only inform users about the success or failure of group events, but also provide actionable feedback when errors occur. This is aligned with the Dietstr’s philosophy of maintaining transparency in user interactions.
+    
+
+---
+
+## 6. Conclusion
+
+The integration of NIP29 groups into Dietstr represents both a technical challenge and a significant step forward in enhancing the social features of the platform. By adhering to the detailed specifications of NIP29 and leveraging the strengths of the current technology stack—including React, Express.js, and nostr-tools—the implementation provides a robust means of ensuring secure and scalable group management. The approaches described in this report, including contrarian ideas such as adopting a microservice architecture for group management, automated role discovery, and enhanced analytics, position Dietstr to not only remain compliant with emerging standards but also to innovate in the social nutrition space.
+
+This comprehensive guide should serve as a blueprint for the development team to implement and iterate on NIP29 functionalities while keeping the codebase maintainable and scalable. Future work may include deeper integration with blockchain identity systems or the addition of advanced real-time analytics to further enrich user experience.
+
+---
+
+_Report Prepared on 2025-04-04 by Expert Research and Technical Analysis Team_
+
+## Sources
+
+- [https://leejjon.medium.com/create-a-react-app-served-by-express-js-node-js-and-add-typescript-33705be3ceda](https://leejjon.medium.com/create-a-react-app-served-by-express-js-node-js-and-add-typescript-33705be3ceda)
+- [https://github.com/max21dev/groups-relay](https://github.com/max21dev/groups-relay)
+- [https://github.com/nostr-protocol/nips/blob/master/29.md](https://github.com/nostr-protocol/nips/blob/master/29.md)
+- [https://stackoverflow.com/questions/47416277/serving-multiple-react-apps-with-client-side-routing-in-express](https://stackoverflow.com/questions/47416277/serving-multiple-react-apps-with-client-side-routing-in-express)
+- [https://medium.com/@ricardojgonzlez/how-to-add-relay-to-create-react-app-with-typescript-b6daacea21dd](https://medium.com/@ricardojgonzlez/how-to-add-relay-to-create-react-app-with-typescript-b6daacea21dd)
+- [https://github.com/nbd-wtf/nostr-tools](https://github.com/nbd-wtf/nostr-tools)
+- [https://jsr.io/@nostr/tools](https://jsr.io/@nostr/tools)
+- [https://www.softermii.com/blog/diet-and-nutrition-tracking-app-development](https://www.softermii.com/blog/diet-and-nutrition-tracking-app-development)
+- [https://stackoverflow.com/questions/71658126/express-js-api-robust-error-handling-solution](https://stackoverflow.com/questions/71658126/express-js-api-robust-error-handling-solution)
+- [https://medium.com/@priyanshu011109/master-error-handling-in-express-js-global-error-logging-5250b60362f6](https://medium.com/@priyanshu011109/master-error-handling-in-express-js-global-error-logging-5250b60362f6)
+- [https://expressjs.com/en/guide/error-handling.html](https://expressjs.com/en/guide/error-handling.html)
+- [https://dev.to/divine_nnanna2/error-handling-and-logging-in-nodejs-applications-1k2a](https://dev.to/divine_nnanna2/error-handling-and-logging-in-nodejs-applications-1k2a)
+- [https://sematext.com/blog/node-js-error-handling/](https://sematext.com/blog/node-js-error-handling/)
+
+
+
+
+
+
+
+
+
+
+
+
+Feed Prompt 
+
+# Creating a Dietstr Nostr Feed for Food and Diet Related Content
+
+Here's a comprehensive prompt to help you implement a Nostr feed in your Dietstr app that specifically filters for food and diet-related content:
+
+## Implementation Prompt for Dietstr Feed
+
+I need to create a component for the Dietstr app that displays a Nostr feed specifically filtered for diet and food-related content. The feed should:
+
+1. Fetch and display posts with hashtags: #Foodstr, #Dietstr, #Food, #Diet, #Carnivore, #Fasting, and #Hydration
+2. Support interactions like commenting, liking, reposting, and zapping
+3. Include infinite scrolling for loading more posts
+4. Display user profiles with their pictures and names
+5. Show images when they're included in posts
+6. Handle loading states and errors gracefully
+
+Based on the RunClub component example, I'll adapt it to create a FoodFeed component that implements these requirements.
+
+```javascript
+import { useState, useEffect, useCallback, useContext } from 'react';
+import { NDKEvent } from '@nostr-dev-kit/ndk';
+import { ndk, initializeNostr } from '../utils/nostr';
+import { NostrContext } from '../contexts/NostrContext';
+import { useAuth } from '../hooks/useAuth';
+
+export const FoodFeed = () => {
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [commentText, setCommentText] = useState('');
+  const { defaultZapAmount } = useContext(NostrContext);
+  const [userLikes, setUserLikes] = useState(new Set());
+  const [userReposts, setUserReposts] = useState(new Set());
+  const { wallet } = useAuth();
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [loadedSupplementaryData, setLoadedSupplementaryData] = useState(new Set());
+
+  // Define diet-related hashtags for filtering
+  const DIET_HASHTAGS = ["Foodstr", "Dietstr", "Food", "Diet", "Carnivore", "Fasting", "Hydration"];
+
+  const processBasicPostData = useCallback(async (newPosts) => {
+    try {
+      if (!newPosts || newPosts.length === 0) {
+        return [];
+      }
+
+      console.log('Processing basic post data for', newPosts.length, 'posts');
+      const authors = [...new Set(newPosts.map((post) => post.pubkey))];
+      
+      const profileEvents = await ndk.fetchEvents({
+        kinds: [0],
+        authors
+      });
+
+      const profileMap = new Map(
+        Array.from(profileEvents).map((profile) => {
+          try {
+            return [profile.pubkey, JSON.parse(profile.content)];
+          } catch (err) {
+            console.error('Error parsing profile:', err);
+            return [profile.pubkey, {}];
+          }
+        })
+      );
+
+      return newPosts
+        .map((post) => {
+          const profile = profileMap.get(post.pubkey) || {};
+          
+          return {
+            id: post.id,
+            content: post.content,
+            created_at: post.created_at,
+            author: {
+              pubkey: post.pubkey,
+              profile: profile,
+              lud16: profile.lud16,
+              lud06: profile.lud06
+            },
+            comments: [],
+            showComments: false,
+            likes: 0,
+            reposts: 0,
+            zaps: 0,
+            zapAmount: 0,
+            hasFullData: false
+          };
+        })
+        .sort((a, b) => b.created_at - a.created_at);
+    } catch (err) {
+      console.error('Error processing basic post data:', err);
+      return newPosts.map(post => ({
+        id: post.id,
+        content: post.content,
+        created_at: post.created_at,
+        author: {
+          pubkey: post.pubkey,
+          profile: {}
+        },
+        comments: [],
+        showComments: false,
+        likes: 0,
+        reposts: 0,
+        zaps: 0,
+        zapAmount: 0,
+        hasFullData: false
+      })).sort((a, b) => b.created_at - a.created_at);
+    }
+  }, []);
+
+  const loadSupplementaryData = useCallback(async (postId) => {
+    if (loadedSupplementaryData.has(postId)) {
+      return;
+    }
+
+    console.log('Loading supplementary data for post:', postId);
+    setLoadedSupplementaryData(prev => new Set([...prev, postId]));
+
+    const postIndex = posts.findIndex(p => p.id === postId);
+    if (postIndex === -1) return;
+    
+    const post = posts[postIndex];
+    
+    const [comments, likes, reposts, zapReceipts] = await Promise.all([
+      ndk.fetchEvents({
+        kinds: [1],
+        '#e': [postId]
+      }),
+      ndk.fetchEvents({
+        kinds: [7],
+        '#e': [postId]
+      }),
+      ndk.fetchEvents({
+        kinds: [6],
+        '#e': [postId]
+      }),
+      ndk.fetchEvents({
+        kinds: [9735],
+        '#e': [postId]
+      })
+    ]);
+
+    const commentAuthors = [...new Set(Array.from(comments).map(c => c.pubkey))];
+    
+    const commentProfileEvents = commentAuthors.length > 0 ? await ndk.fetchEvents({
+      kinds: [0],
+      authors: commentAuthors
+    }) : new Set();
+
+    const profileMap = new Map(
+      Array.from(commentProfileEvents).map((profile) => {
+        try {
+          return [profile.pubkey, JSON.parse(profile.content)];
+        } catch (err) {
+          console.error('Error parsing profile:', err);
+          return [profile.pubkey, {}];
+        }
+      })
+    );
+
+    let userPubkey = '';
+    try {
+      if (window.nostr) {
+        userPubkey = await window.nostr.getPublicKey();
+      }
+    } catch (err) {
+      console.error('Error getting user pubkey:', err);
+    }
+
+    let likesCount = 0;
+    let userLiked = false;
+    Array.from(likes).forEach(like => {
+      likesCount++;
+      if (like.pubkey === userPubkey) {
+        userLiked = true;
+      }
+    });
+
+    let repostsCount = 0;
+    let userReposted = false;
+    Array.from(reposts).forEach(repost => {
+      repostsCount++;
+      if (repost.pubkey === userPubkey) {
+        userReposted = true;
+      }
+    });
+
+    let zapCount = 0;
+    let zapAmount = 0;
+    Array.from(zapReceipts).forEach(zapReceipt => {
+      try {
+        zapCount++;
+        
+        const amountTag = zapReceipt.tags.find(tag => tag[0] === 'amount');
+        if (amountTag && amountTag[1]) {
+          zapAmount += parseInt(amountTag[1], 10) / 1000;
+        }
+      } catch (err) {
+        console.error('Error processing zap receipt:', err);
+      }
+    });
+
+    const processedComments = Array.from(comments).map((comment) => {
+      const profile = profileMap.get(comment.pubkey) || {};
+      return {
+        id: comment.id,
+        content: comment.content,
+        created_at: comment.created_at,
+        author: {
+          pubkey: comment.pubkey,
+          profile: profile
+        }
+      };
+    }).sort((a, b) => a.created_at - b.created_at);
+
+    if (userLiked) {
+      setUserLikes(prev => new Set([...prev, postId]));
+    }
+    
+    if (userReposted) {
+      setUserReposts(prev => new Set([...prev, postId]));
+    }
+
+    const updatedPost = {
+      ...post,
+      comments: processedComments,
+      likes: likesCount,
+      reposts: repostsCount,
+      zaps: zapCount,
+      zapAmount: zapAmount,
+      hasFullData: true
+    };
+
+    setPosts(currentPosts => {
+      const newPosts = [...currentPosts];
+      newPosts[postIndex] = updatedPost;
+      return newPosts;
+    });
+
+  }, [posts, loadedSupplementaryData]);
+
+  const processAndUpdatePosts = useCallback(async (newPosts, append = false) => {
+    if (!newPosts || newPosts.length === 0) {
+      if (!append) {
+        setPosts([]);
+      }
+      return [];
+    }
+    
+    const processedPosts = await processBasicPostData(newPosts);
+    
+    return processedPosts;
+  }, [processBasicPostData]);
+
+  const fetchFoodPosts = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      await initializeNostr();
+
+      const limit = 20;
+      const since = page > 1 ? Date.now() - (page * 7 * 24 * 60 * 60 * 1000) : undefined;
+  
+      // Fetch posts with diet-related hashtags
+      const foodPosts = await ndk.fetchEvents({
+        kinds: [1],  // Regular notes
+        limit,
+        since,
+        "#t": DIET_HASHTAGS  // Filter by our diet hashtags
+      });
+
+      const postsArray = Array.from(foodPosts).sort((a, b) => b.created_at - a.created_at);
+      
+      if (postsArray.length < limit) {
+        setHasMore(false);
+      }
+      
+      const processedPosts = await processAndUpdatePosts(postsArray, page > 1);
+      
+      if (page === 1) {
+        setPosts(processedPosts);
+      } else {
+        setPosts(prevPosts => [...prevPosts, ...processedPosts]);
+      }
+      
+      setInitialLoadComplete(true);
+    } catch (err) {
+      console.error('Error fetching food posts:', err);
+      setError('Failed to load posts. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  }, [page, processAndUpdatePosts, DIET_HASHTAGS]);
+
+  const loadMorePosts = useCallback(() => {
+    if (!loading && hasMore) {
+      setPage(prevPage => prevPage + 1);
+    }
+  }, [loading, hasMore]);
+
+  useEffect(() => {
+    let mounted = true;
+    
+    const init = async () => {
+      if ((page === 1 || initialLoadComplete) && mounted) {
+        await fetchFoodPosts();
+      }
+    };
+    
+    init();
+
+    return () => {
+      mounted = false;
+    };
+  }, [fetchFoodPosts, page, initialLoadComplete]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (
+        window.innerHeight + document.documentElement.scrollTop >=
+        document.documentElement.offsetHeight - 300
+      ) {
+        loadMorePosts();
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [loadMorePosts]);
+
+  const handleCommentClick = (postId) => {
+    if (!loadedSupplementaryData.has(postId)) {
+      loadSupplementaryData(postId);
+    }
+    
+    setPosts(
+      posts.map((post) =>
+        post.id === postId
+          ? { ...post, showComments: !post.showComments }
+          : post
+      )
+    );
+  };
+
+  const handleLike = async (post) => {
+    if (!loadedSupplementaryData.has(post.id)) {
+      await loadSupplementaryData(post.id);
+    }
+    
+    if (!window.nostr) {
+      alert('Please login to like posts');
+      return;
+    }
+
+    try {
+      const likeEvent = {
+        kind: 7,
+        created_at: Math.floor(Date.now() / 1000),
+        content: '+',
+        tags: [
+          ['e', post.id],
+          ['p', post.author.pubkey]
+        ],
+        pubkey: await window.nostr.getPublicKey()
+      };
+
+      const signedEvent = await window.nostr.signEvent(likeEvent);
+
+      const ndkEvent = new NDKEvent(ndk, signedEvent);
+      await ndkEvent.publish();
+
+      setUserLikes(prev => {
+        const newLikes = new Set(prev);
+        newLikes.add(post.id);
+        return newLikes;
+      });
+
+      setPosts(currentPosts => {
+        return currentPosts.map(p => 
+          p.id === post.id 
+            ? { ...p, likes: p.likes + 1 } 
+            : p
+        );
+      });
+
+      console.log('Post liked successfully');
+    } catch (error) {
+      console.error('Error liking post:', error);
+      alert('Failed to like post: ' + error.message);
+    }
+  };
+
+  const handleRepost = async (post) => {
+    if (!loadedSupplementaryData.has(post.id)) {
+      await loadSupplementaryData(post.id);
+    }
+    
+    if (!window.nostr) {
+      alert('Please login to repost');
+      return;
+    }
+
+    try {
+      const repostEvent = {
+        kind: 6,
+        created_at: Math.floor(Date.now() / 1000),
+        content: '',
+        tags: [
+          ['e', post.id, '', 'mention'],
+          ['p', post.author.pubkey]
+        ],
+        pubkey: await window.nostr.getPublicKey()
+      };
+
+      const signedEvent = await window.nostr.signEvent(repostEvent);
+
+      const ndkEvent = new NDKEvent(ndk, signedEvent);
+      await ndkEvent.publish();
+
+      setUserReposts(prev => {
+        const newReposts = new Set(prev);
+        newReposts.add(post.id);
+        return newReposts;
+      });
+
+      setPosts(currentPosts => {
+        return currentPosts.map(p => 
+          p.id === post.id 
+            ? { ...p, reposts: p.reposts + 1 } 
+            : p
+        );
+      });
+
+      console.log('Post reposted successfully');
+    } catch (error) {
+      console.error('Error reposting:', error);
+      alert('Failed to repost: ' + error.message);
+    }
+  };
+
+  const handleZap = async (post) => {
+    if (!loadedSupplementaryData.has(post.id)) {
+      await loadSupplementaryData(post.id);
+    }
+
+    if (!window.nostr) {
+      alert('Please login to send zaps');
+      return;
+    }
+
+    if (!wallet) {
+      alert('Please connect a Bitcoin wallet to send zaps');
+      return;
+    }
+
+    try {
+      if (!post.author.lud16 && !post.author.lud06) {
+        alert('This user has not set up their Lightning address in their Nostr profile');
+        return;
+      }
+
+      try {
+        console.log(`Attempting to zap ${defaultZapAmount} sats using NDK...`);
+        
+        const ndkEvent = new NDKEvent(ndk);
+        ndkEvent.id = post.id;
+        ndkEvent.pubkey = post.author.pubkey;
+        
+        if (!ndkEvent.zap) {
+          throw new Error('NDK zap method not available');
+        }
+        
+        const zapResult = await ndkEvent.zap(
+          defaultZapAmount,
+          async (invoice) => {
+            return await wallet.makePayment(invoice);
+          },
+          'Thanks for sharing your food journey! ⚡️'
+        );
+        
+        setPosts(currentPosts => 
+          currentPosts.map(p => {
+            if (p.id === post.id) {
+              return {
+                ...p,
+                zaps: p.zaps + 1,
+                zapAmount: p.zapAmount + defaultZapAmount
+              };
+            }
+            return p;
+          })
+        );
+
+        alert('Zap sent successfully! ⚡️');
+        return;
+      } catch (ndkZapError) {
+        console.error('NDK zap error:', ndkZapError);
+        console.warn('NDK zap failed, falling back to manual approach');
+      }
+        
+      const lnurl = post.author.lud16 || post.author.lud06;
+      
+      const zapEvent = {
+        kind: 9734,
+        created_at: Math.floor(Date.now() / 1000),
+        content: 'Thanks for sharing your food journey! ⚡️',
+        tags: [
+          ['p', post.author.pubkey],
+          ['e', post.id],
+          ['amount', (defaultZapAmount * 1000).toString()],
+        ],
+        pubkey: await window.nostr.getPublicKey()
+      };
+      
+      const signedEvent = await window.nostr.signEvent(zapEvent);
+      
+      const ndkEvent = new NDKEvent(ndk, signedEvent);
+      await ndkEvent.publish();
+      
+      let zapEndpoint;
+      if (lnurl.includes('@')) {
+        const [username, domain] = lnurl.split('@');
+        zapEndpoint = `https://${domain}/.well-known/lnurlp/${username}`;
+      } else {
+        zapEndpoint = lnurl;
+      }
+      
+      const response = await fetch(zap
+
+
+
+

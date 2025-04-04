@@ -1,0 +1,534 @@
+reating a Dietstr Nostr Feed for Food and Diet Related Content
+
+Here's a comprehensive prompt to help you implement a Nostr feed in your Dietstr app that specifically filters for food and diet-related content:
+
+## Implementation Prompt for Dietstr Feed
+
+I need to create a component for the Dietstr app that displays a Nostr feed specifically filtered for diet and food-related content. The feed should:
+
+1. Fetch and display posts with hashtags: #Foodstr, #Dietstr, #Food, #Diet, #Carnivore, #Fasting, and #Hydration
+2. Support interactions like commenting, liking, reposting, and zapping
+3. Include infinite scrolling for loading more posts
+4. Display user profiles with their pictures and names
+5. Show images when they're included in posts
+6. Handle loading states and errors gracefully
+
+Based on the RunClub component example, I'll adapt it to create a FoodFeed component that implements these requirements.
+
+```javascript
+import { useState, useEffect, useCallback, useContext } from 'react';
+import { NDKEvent } from '@nostr-dev-kit/ndk';
+import { ndk, initializeNostr } from '../utils/nostr';
+import { NostrContext } from '../contexts/NostrContext';
+import { useAuth } from '../hooks/useAuth';
+
+export const FoodFeed = () => {
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [commentText, setCommentText] = useState('');
+  const { defaultZapAmount } = useContext(NostrContext);
+  const [userLikes, setUserLikes] = useState(new Set());
+  const [userReposts, setUserReposts] = useState(new Set());
+  const { wallet } = useAuth();
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [loadedSupplementaryData, setLoadedSupplementaryData] = useState(new Set());
+
+  // Define diet-related hashtags for filtering
+  const DIET_HASHTAGS = ["Foodstr", "Dietstr", "Food", "Diet", "Carnivore", "Fasting", "Hydration"];
+
+  const processBasicPostData = useCallback(async (newPosts) => {
+    try {
+      if (!newPosts || newPosts.length === 0) {
+        return [];
+      }
+
+      console.log('Processing basic post data for', newPosts.length, 'posts');
+      const authors = [...new Set(newPosts.map((post) => post.pubkey))];
+      
+      const profileEvents = await ndk.fetchEvents({
+        kinds: [0],
+        authors
+      });
+
+      const profileMap = new Map(
+        Array.from(profileEvents).map((profile) => {
+          try {
+            return [profile.pubkey, JSON.parse(profile.content)];
+          } catch (err) {
+            console.error('Error parsing profile:', err);
+            return [profile.pubkey, {}];
+          }
+        })
+      );
+
+      return newPosts
+        .map((post) => {
+          const profile = profileMap.get(post.pubkey) || {};
+          
+          return {
+            id: post.id,
+            content: post.content,
+            created_at: post.created_at,
+            author: {
+              pubkey: post.pubkey,
+              profile: profile,
+              lud16: profile.lud16,
+              lud06: profile.lud06
+            },
+            comments: [],
+            showComments: false,
+            likes: 0,
+            reposts: 0,
+            zaps: 0,
+            zapAmount: 0,
+            hasFullData: false
+          };
+        })
+        .sort((a, b) => b.created_at - a.created_at);
+    } catch (err) {
+      console.error('Error processing basic post data:', err);
+      return newPosts.map(post => ({
+        id: post.id,
+        content: post.content,
+        created_at: post.created_at,
+        author: {
+          pubkey: post.pubkey,
+          profile: {}
+        },
+        comments: [],
+        showComments: false,
+        likes: 0,
+        reposts: 0,
+        zaps: 0,
+        zapAmount: 0,
+        hasFullData: false
+      })).sort((a, b) => b.created_at - a.created_at);
+    }
+  }, []);
+
+  const loadSupplementaryData = useCallback(async (postId) => {
+    if (loadedSupplementaryData.has(postId)) {
+      return;
+    }
+
+    console.log('Loading supplementary data for post:', postId);
+    setLoadedSupplementaryData(prev => new Set([...prev, postId]));
+
+    const postIndex = posts.findIndex(p => p.id === postId);
+    if (postIndex === -1) return;
+    
+    const post = posts[postIndex];
+    
+    const [comments, likes, reposts, zapReceipts] = await Promise.all([
+      ndk.fetchEvents({
+        kinds: [1],
+        '#e': [postId]
+      }),
+      ndk.fetchEvents({
+        kinds: [7],
+        '#e': [postId]
+      }),
+      ndk.fetchEvents({
+        kinds: [6],
+        '#e': [postId]
+      }),
+      ndk.fetchEvents({
+        kinds: [9735],
+        '#e': [postId]
+      })
+    ]);
+
+    const commentAuthors = [...new Set(Array.from(comments).map(c => c.pubkey))];
+    
+    const commentProfileEvents = commentAuthors.length > 0 ? await ndk.fetchEvents({
+      kinds: [0],
+      authors: commentAuthors
+    }) : new Set();
+
+    const profileMap = new Map(
+      Array.from(commentProfileEvents).map((profile) => {
+        try {
+          return [profile.pubkey, JSON.parse(profile.content)];
+        } catch (err) {
+          console.error('Error parsing profile:', err);
+          return [profile.pubkey, {}];
+        }
+      })
+    );
+
+    let userPubkey = '';
+    try {
+      if (window.nostr) {
+        userPubkey = await window.nostr.getPublicKey();
+      }
+    } catch (err) {
+      console.error('Error getting user pubkey:', err);
+    }
+
+    let likesCount = 0;
+    let userLiked = false;
+    Array.from(likes).forEach(like => {
+      likesCount++;
+      if (like.pubkey === userPubkey) {
+        userLiked = true;
+      }
+    });
+
+    let repostsCount = 0;
+    let userReposted = false;
+    Array.from(reposts).forEach(repost => {
+      repostsCount++;
+      if (repost.pubkey === userPubkey) {
+        userReposted = true;
+      }
+    });
+
+    let zapCount = 0;
+    let zapAmount = 0;
+    Array.from(zapReceipts).forEach(zapReceipt => {
+      try {
+        zapCount++;
+        
+        const amountTag = zapReceipt.tags.find(tag => tag[0] === 'amount');
+        if (amountTag && amountTag[1]) {
+          zapAmount += parseInt(amountTag[1], 10) / 1000;
+        }
+      } catch (err) {
+        console.error('Error processing zap receipt:', err);
+      }
+    });
+
+    const processedComments = Array.from(comments).map((comment) => {
+      const profile = profileMap.get(comment.pubkey) || {};
+      return {
+        id: comment.id,
+        content: comment.content,
+        created_at: comment.created_at,
+        author: {
+          pubkey: comment.pubkey,
+          profile: profile
+        }
+      };
+    }).sort((a, b) => a.created_at - b.created_at);
+
+    if (userLiked) {
+      setUserLikes(prev => new Set([...prev, postId]));
+    }
+    
+    if (userReposted) {
+      setUserReposts(prev => new Set([...prev, postId]));
+    }
+
+    const updatedPost = {
+      ...post,
+      comments: processedComments,
+      likes: likesCount,
+      reposts: repostsCount,
+      zaps: zapCount,
+      zapAmount: zapAmount,
+      hasFullData: true
+    };
+
+    setPosts(currentPosts => {
+      const newPosts = [...currentPosts];
+      newPosts[postIndex] = updatedPost;
+      return newPosts;
+    });
+
+  }, [posts, loadedSupplementaryData]);
+
+  const processAndUpdatePosts = useCallback(async (newPosts, append = false) => {
+    if (!newPosts || newPosts.length === 0) {
+      if (!append) {
+        setPosts([]);
+      }
+      return [];
+    }
+    
+    const processedPosts = await processBasicPostData(newPosts);
+    
+    return processedPosts;
+  }, [processBasicPostData]);
+
+  const fetchFoodPosts = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      await initializeNostr();
+
+      const limit = 20;
+      const since = page > 1 ? Date.now() - (page * 7 * 24 * 60 * 60 * 1000) : undefined;
+  
+      // Fetch posts with diet-related hashtags
+      const foodPosts = await ndk.fetchEvents({
+        kinds: [1],  // Regular notes
+        limit,
+        since,
+        "#t": DIET_HASHTAGS  // Filter by our diet hashtags
+      });
+
+      const postsArray = Array.from(foodPosts).sort((a, b) => b.created_at - a.created_at);
+      
+      if (postsArray.length < limit) {
+        setHasMore(false);
+      }
+      
+      const processedPosts = await processAndUpdatePosts(postsArray, page > 1);
+      
+      if (page === 1) {
+        setPosts(processedPosts);
+      } else {
+        setPosts(prevPosts => [...prevPosts, ...processedPosts]);
+      }
+      
+      setInitialLoadComplete(true);
+    } catch (err) {
+      console.error('Error fetching food posts:', err);
+      setError('Failed to load posts. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  }, [page, processAndUpdatePosts, DIET_HASHTAGS]);
+
+  const loadMorePosts = useCallback(() => {
+    if (!loading && hasMore) {
+      setPage(prevPage => prevPage + 1);
+    }
+  }, [loading, hasMore]);
+
+  useEffect(() => {
+    let mounted = true;
+    
+    const init = async () => {
+      if ((page === 1 || initialLoadComplete) && mounted) {
+        await fetchFoodPosts();
+      }
+    };
+    
+    init();
+
+    return () => {
+      mounted = false;
+    };
+  }, [fetchFoodPosts, page, initialLoadComplete]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      if (
+        window.innerHeight + document.documentElement.scrollTop >=
+        document.documentElement.offsetHeight - 300
+      ) {
+        loadMorePosts();
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [loadMorePosts]);
+
+  const handleCommentClick = (postId) => {
+    if (!loadedSupplementaryData.has(postId)) {
+      loadSupplementaryData(postId);
+    }
+    
+    setPosts(
+      posts.map((post) =>
+        post.id === postId
+          ? { ...post, showComments: !post.showComments }
+          : post
+      )
+    );
+  };
+
+  const handleLike = async (post) => {
+    if (!loadedSupplementaryData.has(post.id)) {
+      await loadSupplementaryData(post.id);
+    }
+    
+    if (!window.nostr) {
+      alert('Please login to like posts');
+      return;
+    }
+
+    try {
+      const likeEvent = {
+        kind: 7,
+        created_at: Math.floor(Date.now() / 1000),
+        content: '+',
+        tags: [
+          ['e', post.id],
+          ['p', post.author.pubkey]
+        ],
+        pubkey: await window.nostr.getPublicKey()
+      };
+
+      const signedEvent = await window.nostr.signEvent(likeEvent);
+
+      const ndkEvent = new NDKEvent(ndk, signedEvent);
+      await ndkEvent.publish();
+
+      setUserLikes(prev => {
+        const newLikes = new Set(prev);
+        newLikes.add(post.id);
+        return newLikes;
+      });
+
+      setPosts(currentPosts => {
+        return currentPosts.map(p => 
+          p.id === post.id 
+            ? { ...p, likes: p.likes + 1 } 
+            : p
+        );
+      });
+
+      console.log('Post liked successfully');
+    } catch (error) {
+      console.error('Error liking post:', error);
+      alert('Failed to like post: ' + error.message);
+    }
+  };
+
+  const handleRepost = async (post) => {
+    if (!loadedSupplementaryData.has(post.id)) {
+      await loadSupplementaryData(post.id);
+    }
+    
+    if (!window.nostr) {
+      alert('Please login to repost');
+      return;
+    }
+
+    try {
+      const repostEvent = {
+        kind: 6,
+        created_at: Math.floor(Date.now() / 1000),
+        content: '',
+        tags: [
+          ['e', post.id, '', 'mention'],
+          ['p', post.author.pubkey]
+        ],
+        pubkey: await window.nostr.getPublicKey()
+      };
+
+      const signedEvent = await window.nostr.signEvent(repostEvent);
+
+      const ndkEvent = new NDKEvent(ndk, signedEvent);
+      await ndkEvent.publish();
+
+      setUserReposts(prev => {
+        const newReposts = new Set(prev);
+        newReposts.add(post.id);
+        return newReposts;
+      });
+
+      setPosts(currentPosts => {
+        return currentPosts.map(p => 
+          p.id === post.id 
+            ? { ...p, reposts: p.reposts + 1 } 
+            : p
+        );
+      });
+
+      console.log('Post reposted successfully');
+    } catch (error) {
+      console.error('Error reposting:', error);
+      alert('Failed to repost: ' + error.message);
+    }
+  };
+
+  const handleZap = async (post) => {
+    if (!loadedSupplementaryData.has(post.id)) {
+      await loadSupplementaryData(post.id);
+    }
+
+    if (!window.nostr) {
+      alert('Please login to send zaps');
+      return;
+    }
+
+    if (!wallet) {
+      alert('Please connect a Bitcoin wallet to send zaps');
+      return;
+    }
+
+    try {
+      if (!post.author.lud16 && !post.author.lud06) {
+        alert('This user has not set up their Lightning address in their Nostr profile');
+        return;
+      }
+
+      try {
+        console.log(`Attempting to zap ${defaultZapAmount} sats using NDK...`);
+        
+        const ndkEvent = new NDKEvent(ndk);
+        ndkEvent.id = post.id;
+        ndkEvent.pubkey = post.author.pubkey;
+        
+        if (!ndkEvent.zap) {
+          throw new Error('NDK zap method not available');
+        }
+        
+        const zapResult = await ndkEvent.zap(
+          defaultZapAmount,
+          async (invoice) => {
+            return await wallet.makePayment(invoice);
+          },
+          'Thanks for sharing your food journey! ⚡️'
+        );
+        
+        setPosts(currentPosts => 
+          currentPosts.map(p => {
+            if (p.id === post.id) {
+              return {
+                ...p,
+                zaps: p.zaps + 1,
+                zapAmount: p.zapAmount + defaultZapAmount
+              };
+            }
+            return p;
+          })
+        );
+
+        alert('Zap sent successfully! ⚡️');
+        return;
+      } catch (ndkZapError) {
+        console.error('NDK zap error:', ndkZapError);
+        console.warn('NDK zap failed, falling back to manual approach');
+      }
+        
+      const lnurl = post.author.lud16 || post.author.lud06;
+      
+      const zapEvent = {
+        kind: 9734,
+        created_at: Math.floor(Date.now() / 1000),
+        content: 'Thanks for sharing your food journey! ⚡️',
+        tags: [
+          ['p', post.author.pubkey],
+          ['e', post.id],
+          ['amount', (defaultZapAmount * 1000).toString()],
+        ],
+        pubkey: await window.nostr.getPublicKey()
+      };
+      
+      const signedEvent = await window.nostr.signEvent(zapEvent);
+      
+      const ndkEvent = new NDKEvent(ndk, signedEvent);
+      await ndkEvent.publish();
+      
+      let zapEndpoint;
+      if (lnurl.includes('@')) {
+        const [username, domain] = lnurl.split('@');
+        zapEndpoint = `https://${domain}/.well-known/lnurlp/${username}`;
+      } else {
+        zapEndpoint = lnurl;
+      }
+      
+      const response = await fetch(zap
+
+
+
+

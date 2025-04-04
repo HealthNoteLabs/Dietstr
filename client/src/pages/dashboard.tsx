@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -7,7 +7,7 @@ import DailyLog from "@/components/daily-log";
 import NutritionSummary from "@/components/nutrition-summary";
 import WaterTracker from "@/components/water-tracker";
 import { Button } from "@/components/ui/button";
-import { LogOut, ListPlus, Activity, Droplets, Menu } from "lucide-react";
+import { LogOut, ListPlus, Activity, Droplets, Menu, Rss } from "lucide-react";
 import { User } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { isNativeApp, getPreference, removePreference } from "../capacitor";
@@ -121,6 +121,17 @@ export default function Dashboard() {
                             Food Log
                           </Button>
                         </SheetClose>
+                        <SheetClose asChild>
+                          <Link href="/feed">
+                            <Button 
+                              variant="ghost" 
+                              className="justify-start w-full"
+                            >
+                              <Rss className="h-4 w-4 mr-2" />
+                              Nostr Feed
+                            </Button>
+                          </Link>
+                        </SheetClose>
                       </div>
                     </div>
                     <Button variant="outline" onClick={handleLogout} className="mt-auto">
@@ -199,10 +210,18 @@ export default function Dashboard() {
       <header className="border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-bold">Dietstr</h1>
-          <Button variant="ghost" onClick={handleLogout}>
-            <LogOut className="h-4 w-4 mr-2" />
-            Logout
-          </Button>
+          <div className="flex items-center space-x-2">
+            <Link href="/feed">
+              <Button variant="outline">
+                <Rss className="h-4 w-4 mr-2" />
+                Nostr Feed
+              </Button>
+            </Link>
+            <Button variant="ghost" onClick={handleLogout}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
+          </div>
         </div>
       </header>
 

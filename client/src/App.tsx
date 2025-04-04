@@ -6,6 +6,8 @@ import { Toaster } from "@/components/ui/toaster";
 import Dashboard from "@/pages/dashboard";
 import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
+import { NostrProvider } from "./contexts/NostrContext";
+import { NostrFeed } from "./components/NostrFeed";
 import { 
   isNativeApp, 
   isAndroid, 
@@ -61,6 +63,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Login} />
       <Route path="/dashboard" component={Dashboard} />
+      <Route path="/feed" component={NostrFeed} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -134,15 +137,17 @@ function App() {
   return (
     <PlatformContext.Provider value={platform}>
       <QueryClientProvider client={queryClient}>
-        <div className={`app-container ${platform.isNative ? 'mobile-container pb-safe' : ''}`}>
-          {/* Show app content when ready, could add a loading spinner here */}
-          {appReady && (
-            <>
-              <Router />
-              <Toaster />
-            </>
-          )}
-        </div>
+        <NostrProvider>
+          <div className={`app-container ${platform.isNative ? 'mobile-container pb-safe' : ''}`}>
+            {/* Show app content when ready, could add a loading spinner here */}
+            {appReady && (
+              <>
+                <Router />
+                <Toaster />
+              </>
+            )}
+          </div>
+        </NostrProvider>
       </QueryClientProvider>
     </PlatformContext.Provider>
   );
