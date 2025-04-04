@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Dietstr</string>
+    <string name="title_activity_main">Dietstr</string>
+    <string name="package_name">com.healthnotelabs.dietstr</string>
+    <string name="custom_url_scheme">com.healthnotelabs.dietstr</string>
+</resources>

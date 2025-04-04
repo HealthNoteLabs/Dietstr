@@ -9,5 +9,76 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+  
+  /* Remove iOS tap highlight */
+  a, button {
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  /* Capacitor app styles */
+  html.capacitor {
+    @apply overflow-hidden;
+  }
+  
+  html.capacitor body {
+    @apply overflow-hidden h-full;
+    /* Safe area padding for notches */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  
+  /* Better scrolling on mobile */
+  .scroll-smooth {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Native app styling */
+  .native-app header {
+    /* Account for status bar on mobile */
+    padding-top: max(env(safe-area-inset-top), 16px);
+  }
+  
+  /* Android specific styling */
+  .android-app .card {
+    /* Increase touch target size */
+    --card-padding: 1.25rem;
+  }
+  
+  .android-app input,
+  .android-app button,
+  .android-app textarea,
+  .android-app select {
+    /* Better touch feedback */
+    @apply focus:outline-2 focus:outline-offset-2;
+  }
+  
+  /* Mobile styling (both native and responsive web) */
+  .mobile-container {
+    /* More compact spacing on mobile */
+    --container-padding: 0.75rem;
+  }
+  
+  @media (max-width: 640px) {
+    .container {
+      padding-left: var(--container-padding, 1rem);
+      padding-right: var(--container-padding, 1rem);
+    }
+    
+    /* More reasonable font sizes on mobile */
+    h1, .h1 {
+      @apply text-2xl;
+    }
+    
+    h2, .h2 {
+      @apply text-xl;
+    }
+    
+    /* Better bottom spacing for mobile devices with home indicators */
+    .pb-safe {
+      padding-bottom: max(env(safe-area-inset-bottom), 1rem);
+    }
   }
 }
