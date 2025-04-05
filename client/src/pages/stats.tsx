@@ -5,6 +5,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { User, FoodEntry, WaterEntry } from "@shared/schema";
 import { Progress } from "@/components/ui/progress";
 import { CalendarIcon, DropletIcon, FlameIcon, TrendingUpIcon, Utensils, Beef, Salad } from "lucide-react";
+import ProfileUpdate from "@/components/profile-update";
 import { format, subDays, isWithinInterval, startOfDay, endOfDay, differenceInDays } from "date-fns";
 
 export default function StatsPage() {
@@ -270,7 +271,10 @@ export default function StatsPage() {
 
   return (
     <div className="container max-w-4xl mx-auto py-6 px-4 sm:px-6 space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight mb-6">Diet Stats & Streaks</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-3xl font-bold tracking-tight">Diet Stats & Streaks</h1>
+        <ProfileUpdate userId={user?.id} user={user} />
+      </div>
       
       {/* Weekly Averages */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -438,6 +442,59 @@ export default function StatsPage() {
               Select a diet plan on the dashboard to track your adherence streak and get diet-specific recommendations.
             </CardDescription>
           </CardHeader>
+        </Card>
+      )}
+      
+      {/* Profile Information Display */}
+      {user?.preferences?.profile && Object.keys(user.preferences.profile).some(key => !!user.preferences.profile?.[key as keyof typeof user.preferences.profile]) && (
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUpIcon className="h-5 w-5 text-purple-500" />
+              Profile Information
+            </CardTitle>
+            <CardDescription>
+              Your personal stats help us provide better recommendations
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+              {user.preferences.profile.weight && (
+                <div className="space-y-1">
+                  <span className="text-sm text-muted-foreground">Weight</span>
+                  <p className="font-medium">{user.preferences.profile.weight} kg</p>
+                </div>
+              )}
+              
+              {user.preferences.profile.height && (
+                <div className="space-y-1">
+                  <span className="text-sm text-muted-foreground">Height</span>
+                  <p className="font-medium">{user.preferences.profile.height} cm</p>
+                </div>
+              )}
+              
+              {user.preferences.profile.gender && (
+                <div className="space-y-1">
+                  <span className="text-sm text-muted-foreground">Gender</span>
+                  <p className="font-medium">{user.preferences.profile.gender.charAt(0).toUpperCase() + user.preferences.profile.gender.slice(1)}</p>
+                </div>
+              )}
+              
+              {user.preferences.profile.age && (
+                <div className="space-y-1">
+                  <span className="text-sm text-muted-foreground">Age</span>
+                  <p className="font-medium">{user.preferences.profile.age} years</p>
+                </div>
+              )}
+              
+              {user.preferences.profile.fitnessLevel && (
+                <div className="space-y-1">
+                  <span className="text-sm text-muted-foreground">Fitness Level</span>
+                  <p className="font-medium">{user.preferences.profile.fitnessLevel.charAt(0).toUpperCase() + user.preferences.profile.fitnessLevel.slice(1)}</p>
+                </div>
+              )}
+            </div>
+          </CardContent>
         </Card>
       )}
     </div>

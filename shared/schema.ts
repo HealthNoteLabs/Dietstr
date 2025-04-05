@@ -14,6 +14,13 @@ export const users = pgTable("users", {
       fat: number;
     };
     dietPlan?: 'carnivore' | 'keto' | 'fasting' | 'animal-based' | undefined;
+    profile?: {
+      weight?: number;
+      height?: number;
+      gender?: 'male' | 'female' | 'other';
+      age?: number;
+      fitnessLevel?: 'beginner' | 'intermediate' | 'advanced' | 'athletic';
+    };
   }>(),
 });
 
