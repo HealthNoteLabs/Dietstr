@@ -21,7 +21,7 @@ declare global {
 }
 
 // Define diet-related hashtags for filtering
-const DIET_HASHTAGS = ["Foodstr", "Dietstr", "Food", "Diet", "Carnivore", "Fasting", "Hydration"];
+const DIET_HASHTAGS = ["Foodstr", "Dietstr", "Food", "Diet", "Carnivore", "Fasting", "Hydration", "Cooking", "Recipe", "Meal", "Nutrition"];
 
 interface NostrProfile {
   name?: string;
@@ -555,9 +555,13 @@ export const NostrFeed: React.FC = () => {
               hasFoodTags = data.tags.some(tag => {
                 return tag[0] === 't' && (
                   DIET_HASHTAGS.includes(tag[1]) || 
+                  DIET_HASHTAGS.map(t => t.toLowerCase()).includes(tag[1].toLowerCase()) ||
                   tag[1].toLowerCase().includes('food') || 
                   tag[1].toLowerCase().includes('diet') || 
-                  tag[1].toLowerCase().includes('recipe')
+                  tag[1].toLowerCase().includes('recipe') ||
+                  tag[1].toLowerCase().includes('cook') ||
+                  tag[1].toLowerCase().includes('meal') ||
+                  tag[1].toLowerCase().includes('nutrition')
                 );
               });
             }
@@ -570,7 +574,11 @@ export const NostrFeed: React.FC = () => {
                 content.includes('diet') || 
                 content.includes('recipe') || 
                 content.includes('meal') || 
-                content.includes('nutrition');
+                content.includes('nutrition') ||
+                content.includes('cook') ||
+                content.includes('eating') ||
+                content.includes('restaurant') ||
+                DIET_HASHTAGS.some(tag => content.toLowerCase().includes(tag.toLowerCase()));
             }
             
             // Only process if food-related
@@ -602,17 +610,45 @@ export const NostrFeed: React.FC = () => {
         });
         
         // Create an event subscription to relay relevant Nostr events to other clients
+        // Subscribe to all hashtags we care about
         subscription = ndkInstance.subscribe(
-          { kinds: [1], "#t": DIET_HASHTAGS },
+          { 
+            kinds: [1], 
+            "#t": DIET_HASHTAGS
+          },
           { closeOnEose: false } // Keep subscription open
         );
         
         subscription.on('event', (event: NDKEvent) => {
           // Check if this is a new food-related event
-          const hasDietTag = event.tags?.some(tag => 
-            tag[0] === 't' && 
-            DIET_HASHTAGS.includes(tag[1])
+          // More comprehensive check for diet/food related tags
+          let hasDietTag = event.tags?.some(tag => 
+            tag[0] === 't' && (
+              DIET_HASHTAGS.includes(tag[1]) ||
+              DIET_HASHTAGS.map(t => t.toLowerCase()).includes(tag[1].toLowerCase()) ||
+              tag[1].toLowerCase().includes('food') || 
+              tag[1].toLowerCase().includes('diet') || 
+              tag[1].toLowerCase().includes('recipe') ||
+              tag[1].toLowerCase().includes('cook') ||
+              tag[1].toLowerCase().includes('meal') ||
+              tag[1].toLowerCase().includes('nutrition')
+            )
           );
+          
+          // If no tag match, check content
+          if (!hasDietTag && event.content) {
+            const content = event.content.toLowerCase();
+            hasDietTag = 
+              content.includes('food') || 
+              content.includes('diet') || 
+              content.includes('recipe') || 
+              content.includes('meal') || 
+              content.includes('nutrition') ||
+              content.includes('cook') ||
+              content.includes('eating') ||
+              content.includes('restaurant') ||
+              DIET_HASHTAGS.some(tag => content.toLowerCase().includes(tag.toLowerCase()));
+          }
           
           if (hasDietTag && isConnected) {
             // Relay this event to our server for distribution to other clients
