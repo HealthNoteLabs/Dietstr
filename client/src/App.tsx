@@ -7,6 +7,7 @@ import Dashboard from "@/pages/dashboard";
 import Login from "@/pages/login";
 import NotFound from "@/pages/not-found";
 import GroupsPage from "./pages/groups";
+import StatsPage from "./pages/stats";
 import { NostrProvider } from "./contexts/NostrContext";
 import { NostrFeed } from "./components/NostrFeed";
 import { Navigation } from "./components/Navigation";
@@ -66,6 +67,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Login} />
       <Route path="/dashboard" component={Dashboard} />
+      <Route path="/stats" component={StatsPage} />
       <Route path="/feed" component={NostrFeed} />
       <Route path="/groups" component={GroupsPage} />
       <Route path="/groups/:rest*" component={GroupsPage} />

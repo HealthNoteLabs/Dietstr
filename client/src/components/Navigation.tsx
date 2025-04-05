@@ -11,6 +11,7 @@ export function Navigation() {
   
   const links = [
     { href: '/dashboard', label: 'Dashboard' },
+    { href: '/stats', label: 'Stats' },
     { href: '/feed', label: 'Feed' },
     { href: '/groups', label: 'Groups' },
   ];
