@@ -64,6 +64,9 @@ interface NostrPost {
 }
 
 export const NostrFeed: React.FC = () => {
+  // Connect to WebSocket service for real-time updates
+  const { subscribe, sendNostrEvent, isConnected } = useWebSocket(['food_posts', 'nostr_events']);
+
   const [posts, setPosts] = useState<NostrPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -427,6 +430,8 @@ export const NostrFeed: React.FC = () => {
     }
   }, [loading, hasMore]);
 
+
+
   useEffect(() => {
     let mounted = true;
     let initialized = false;
@@ -513,11 +518,9 @@ export const NostrFeed: React.FC = () => {
     };
   }, [fetchFoodPosts, page, initialLoadComplete, isConnected, posts.length, processBasicPostData]);
   
-  // Connect to WebSocket service for real-time updates
-  const { subscribe, sendNostrEvent, isConnected } = useWebSocket(['food_posts', 'nostr_events']);
-  
   // Handle real-time events from WebSocket
   useEffect(() => {
+    // Only run this effect when we have a connection
     if (!isConnected) return;
     
     console.log('Setting up WebSocket handlers for Nostr feed events');
