@@ -2,6 +2,7 @@ import {
   User, InsertUser, 
   FoodEntry, InsertFoodEntry,
   WaterEntry, InsertWaterEntry,
+  DailyNote, InsertDailyNote,
   Group, InsertGroup,
   GroupMember, InsertGroupMember,
   GroupInvite, InsertGroupInvite
@@ -17,6 +18,9 @@ export interface IStorage {
   
   getWaterEntries(userId: number, date: Date): Promise<WaterEntry[]>;
   createWaterEntry(entry: InsertWaterEntry): Promise<WaterEntry>;
+  
+  getDailyNotes(userId: number, date: Date): Promise<DailyNote[]>;
+  createDailyNote(note: InsertDailyNote): Promise<DailyNote>;
   
   // Group methods
   getGroups(): Promise<Group[]>;
@@ -34,6 +38,7 @@ export class MemStorage implements IStorage {
   private users: Map<number, User>;
   private foodEntries: Map<number, FoodEntry>;
   private waterEntries: Map<number, WaterEntry>;
+  private dailyNotes: Map<number, DailyNote>;
   private groups: Map<number, Group>;
   private groupMembers: Map<number, GroupMember>;
   private groupInvites: Map<number, GroupInvite>;
@@ -43,6 +48,7 @@ export class MemStorage implements IStorage {
     this.users = new Map();
     this.foodEntries = new Map();
     this.waterEntries = new Map();
+    this.dailyNotes = new Map();
     this.groups = new Map();
     this.groupMembers = new Map();
     this.groupInvites = new Map();
@@ -125,6 +131,32 @@ export class MemStorage implements IStorage {
     };
     this.waterEntries.set(id, newEntry);
     return newEntry;
+  }
+
+  async getDailyNotes(userId: number, date: Date): Promise<DailyNote[]> {
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    return Array.from(this.dailyNotes.values()).filter(note => 
+      note.userId === userId && 
+      note.date >= startOfDay && 
+      note.date <= endOfDay
+    );
+  }
+
+  async createDailyNote(note: InsertDailyNote): Promise<DailyNote> {
+    const id = this.currentId++;
+    const newNote: DailyNote = { 
+      ...note, 
+      id, 
+      nostrEventId: null, 
+      groupId: null,
+      userId: note.userId ?? null
+    };
+    this.dailyNotes.set(id, newNote);
+    return newNote;
   }
 
   // Group methods implementation

@@ -1,17 +1,11 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Calendar } from "@/components/ui/calendar";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Plus } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import FoodEntry from "./food-entry";
-import type { FoodEntry as FoodEntryType } from "@shared/schema";
+import WaterTracker from "./water-tracker";
+import DailyNotes from "./daily-notes";
+import { addDays, format, subDays } from "date-fns";
+import { Button } from "@/components/ui/button";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useState } from "react";
 
 interface DailyLogProps {
   userId?: number;
@@ -20,81 +14,79 @@ interface DailyLogProps {
 }
 
 export default function DailyLog({ userId, date, onDateChange }: DailyLogProps) {
-  const [isAddingFood, setIsAddingFood] = useState(false);
+  const [activeTab, setActiveTab] = useState("food");
+  
+  const handlePreviousDay = () => {
+    onDateChange(subDays(date, 1));
+  };
 
-  const { data: entries = [] } = useQuery<FoodEntryType[]>({
-    queryKey: [`/api/food-entries`, { userId, date: date.toISOString() }],
-    enabled: !!userId,
-  });
+  const handleNextDay = () => {
+    // Don't allow future dates
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (addDays(date, 1) <= today) {
+      onDateChange(addDays(date, 1));
+    }
+  };
 
-  const mealTypes = ["breakfast", "lunch", "dinner", "snack"] as const;
+  const isTodayOrFuture = () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const currentDate = new Date(date);
+    currentDate.setHours(0, 0, 0, 0);
+    return currentDate >= today;
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Daily Log</h2>
-        <Dialog open={isAddingFood} onOpenChange={setIsAddingFood}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus className="h-4 w-4 mr-2" />
-              Add Food
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add Food Entry</DialogTitle>
-            </DialogHeader>
-            {userId && (
-              <FoodEntry
-                userId={userId}
-                date={date}
-                onSuccess={() => setIsAddingFood(false)}
-              />
-            )}
-          </DialogContent>
-        </Dialog>
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <Button variant="outline" size="icon" onClick={handlePreviousDay}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <h2 className="text-xl font-semibold">
+          {format(date, "EEEE, MMMM d")}
+        </h2>
+        <Button 
+          variant="outline" 
+          size="icon" 
+          onClick={handleNextDay}
+          disabled={isTodayOrFuture()}
+        >
+          <ChevronRight className="h-4 w-4" />
+        </Button>
       </div>
 
-      <Calendar
-        mode="single"
-        selected={date}
-        onSelect={(date) => date && onDateChange(date)}
-        className="rounded-md border"
-      />
-
-      <div className="space-y-6">
-        {mealTypes.map((mealType) => {
-          const mealEntries = entries.filter(
-            (entry) => entry.mealType === mealType
-          );
-
-          return (
-            <div key={mealType} className="space-y-2">
-              <h3 className="font-medium capitalize">{mealType}</h3>
-              {mealEntries.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No entries yet</p>
-              ) : (
-                <div className="space-y-2">
-                  {mealEntries.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="flex justify-between items-center p-2 rounded-lg bg-secondary"
-                    >
-                      <div>
-                        <p className="font-medium">{entry.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          P: {entry.protein}g | C: {entry.carbs}g | F: {entry.fat}g
-                        </p>
-                      </div>
-                      <p className="font-medium">{entry.calories} kcal</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid grid-cols-3 mb-4">
+          <TabsTrigger value="food">Food Log</TabsTrigger>
+          <TabsTrigger value="water">Water</TabsTrigger>
+          <TabsTrigger value="notes">Notes</TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="food" className="space-y-4">
+          <FoodEntry 
+            userId={userId || 0} 
+            date={date}
+            onSuccess={() => {}} 
+          />
+        </TabsContent>
+        
+        <TabsContent value="water" className="space-y-4">
+          <WaterTracker 
+            userId={userId} 
+            date={date}
+            goal={8} 
+          />
+        </TabsContent>
+        
+        <TabsContent value="notes" className="space-y-4">
+          <DailyNotes
+            userId={userId}
+            date={date}
+          />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

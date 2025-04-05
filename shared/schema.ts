@@ -47,6 +47,15 @@ export const waterEntries = pgTable("water_entries", {
   groupId: text("group_id"),
 });
 
+export const dailyNotes = pgTable("daily_notes", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  date: timestamp("date").notNull(),
+  note: text("note").notNull(),
+  nostrEventId: text("nostr_event_id"),
+  groupId: text("group_id"),
+});
+
 // NIP29 Groups
 export const groups = pgTable("groups", {
   id: serial("id").primaryKey(),
@@ -95,6 +104,7 @@ export const groupEvents = pgTable("group_events", {
 export const insertUserSchema = createInsertSchema(users);
 export const insertFoodEntrySchema = createInsertSchema(foodEntries).omit({ id: true, nostrEventId: true, groupId: true });
 export const insertWaterEntrySchema = createInsertSchema(waterEntries).omit({ id: true, nostrEventId: true, groupId: true });
+export const insertDailyNoteSchema = createInsertSchema(dailyNotes).omit({ id: true, nostrEventId: true, groupId: true });
 
 // Group schemas
 export const insertGroupSchema = createInsertSchema(groups).omit({ id: true, kind39000EventId: true, createdAt: true });
@@ -108,6 +118,8 @@ export type FoodEntry = typeof foodEntries.$inferSelect;
 export type InsertFoodEntry = z.infer<typeof insertFoodEntrySchema>;
 export type WaterEntry = typeof waterEntries.$inferSelect;
 export type InsertWaterEntry = z.infer<typeof insertWaterEntrySchema>;
+export type DailyNote = typeof dailyNotes.$inferSelect;
+export type InsertDailyNote = z.infer<typeof insertDailyNoteSchema>;
 
 // Group types
 export type Group = typeof groups.$inferSelect;

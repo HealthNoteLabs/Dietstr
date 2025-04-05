@@ -6,11 +6,13 @@ import {
   insertUserSchema, 
   insertFoodEntrySchema, 
   insertWaterEntrySchema, 
+  insertDailyNoteSchema,
   insertGroupSchema,
   insertGroupMemberSchema,
   insertGroupInviteSchema,
   FoodEntry,
-  WaterEntry
+  WaterEntry,
+  DailyNote
 } from "@shared/schema";
 
 // Interface for tracking Nostr relay subscriptions
@@ -335,6 +337,41 @@ export async function registerRoutes(app: Express) {
       res.json(entry);
     } catch (error) {
       res.status(400).json({ error: "Invalid water entry data" });
+    }
+  });
+
+  // Daily notes endpoints
+  app.get("/api/daily-notes", async (req, res) => {
+    const userId = parseInt(req.query.userId as string);
+    const date = new Date(req.query.date as string);
+    
+    // Check if range parameter is provided for historical data
+    if (req.query.range) {
+      const range = parseInt(req.query.range as string);
+      const notes: DailyNote[] = [];
+      
+      // Fetch notes for each day in the range
+      for (let i = 0; i < range; i++) {
+        const checkDate = new Date(date);
+        checkDate.setDate(checkDate.getDate() + i);
+        const dailyNotes = await storage.getDailyNotes(userId, checkDate);
+        notes.push(...dailyNotes);
+      }
+      
+      return res.json(notes);
+    }
+    
+    const notes = await storage.getDailyNotes(userId, date);
+    res.json(notes);
+  });
+
+  app.post("/api/daily-notes", async (req, res) => {
+    try {
+      const noteData = insertDailyNoteSchema.parse(req.body);
+      const note = await storage.createDailyNote(noteData);
+      res.json(note);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid daily note data" });
     }
   });
 
