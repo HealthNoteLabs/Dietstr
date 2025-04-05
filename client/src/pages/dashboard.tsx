@@ -76,74 +76,54 @@ export default function Dashboard() {
   if (isMobile) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
-        <header className="border-b sticky top-0 z-10 bg-background">
-          <div className="container mx-auto px-4 py-3 flex justify-between items-center">
-            <h1 className="text-xl font-bold">Dietstr</h1>
-            <div className="flex items-center">
-              <Sheet>
-                <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon">
-                    <Menu className="h-5 w-5" />
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="right">
-                  <div className="flex flex-col h-full">
-                    <div className="flex-1 py-8">
-                      <div className="space-y-4">
-                        <h2 className="text-lg font-semibold">Menu</h2>
-                        <SheetClose asChild>
-                          <Button 
-                            variant="ghost" 
-                            onClick={() => setActiveTab("nutrition")}
-                            className="justify-start w-full"
-                          >
-                            <Activity className="h-4 w-4 mr-2" />
-                            Nutrition Summary
-                          </Button>
-                        </SheetClose>
-                        <SheetClose asChild>
-                          <Button 
-                            variant="ghost" 
-                            onClick={() => setActiveTab("water")}
-                            className="justify-start w-full"
-                          >
-                            <Droplets className="h-4 w-4 mr-2" />
-                            Water Tracker
-                          </Button>
-                        </SheetClose>
-                        <SheetClose asChild>
-                          <Button 
-                            variant="ghost" 
-                            onClick={() => setActiveTab("food")}
-                            className="justify-start w-full"
-                          >
-                            <ListPlus className="h-4 w-4 mr-2" />
-                            Food Log
-                          </Button>
-                        </SheetClose>
-                        <SheetClose asChild>
-                          <Link href="/feed">
-                            <Button 
-                              variant="ghost" 
-                              className="justify-start w-full"
-                            >
-                              <Rss className="h-4 w-4 mr-2" />
-                              Nostr Feed
-                            </Button>
-                          </Link>
-                        </SheetClose>
-                      </div>
-                    </div>
-                    <Button variant="outline" onClick={handleLogout} className="mt-auto">
-                      <LogOut className="h-4 w-4 mr-2" />
-                      Logout
-                    </Button>
+        <div className="flex items-center justify-end px-4 py-2">
+          <Sheet>
+            <SheetTrigger asChild>
+              <Button variant="ghost" size="icon">
+                <Menu className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right">
+              <div className="flex flex-col h-full">
+                <div className="flex-1 py-8">
+                  <div className="space-y-4">
+                    <h2 className="text-lg font-semibold">Menu</h2>
+                    <SheetClose asChild>
+                      <Button 
+                        variant="ghost" 
+                        onClick={() => setActiveTab("nutrition")}
+                        className="justify-start w-full"
+                      >
+                        <Activity className="h-4 w-4 mr-2" />
+                        Nutrition Summary
+                      </Button>
+                    </SheetClose>
+                    <SheetClose asChild>
+                      <Button 
+                        variant="ghost" 
+                        onClick={() => setActiveTab("water")}
+                        className="justify-start w-full"
+                      >
+                        <Droplets className="h-4 w-4 mr-2" />
+                        Water Tracker
+                      </Button>
+                    </SheetClose>
+                    <SheetClose asChild>
+                      <Button 
+                        variant="ghost" 
+                        onClick={() => setActiveTab("food")}
+                        className="justify-start w-full"
+                      >
+                        <ListPlus className="h-4 w-4 mr-2" />
+                        Food Log
+                      </Button>
+                    </SheetClose>
                   </div>
-                </SheetContent>
-              </Sheet>
-            </div>
-          </div>
-        </header>
+                </div>
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
 
         <main className="flex-1 container px-3 py-4">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -207,24 +187,6 @@ export default function Dashboard() {
   // Desktop layout
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Dietstr</h1>
-          <div className="flex items-center space-x-2">
-            <Link href="/feed">
-              <Button variant="outline">
-                <Rss className="h-4 w-4 mr-2" />
-                Nostr Feed
-              </Button>
-            </Link>
-            <Button variant="ghost" onClick={handleLogout}>
-              <LogOut className="h-4 w-4 mr-2" />
-              Logout
-            </Button>
-          </div>
-        </div>
-      </header>
-
       <main className="container mx-auto px-4 py-8">
         <div className="grid gap-6 md:grid-cols-2">
           <div className="space-y-6">
