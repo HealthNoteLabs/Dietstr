@@ -1,17 +1,17 @@
 import NDK from '@nostr-dev-kit/ndk';
 
 // Initialize the NDK instance
-let ndk: NDK;
+let ndk: NDK | null = null;
 
 /**
  * Initialize the Nostr Development Kit
  * Sets up relays and connects
  */
-let initializationPromise: Promise<typeof ndk> | null = null;
+let initializationPromise: Promise<NDK> | null = null;
 let cachedUserPubkey: string | null = null;
 let lastPubkeyFetch = 0;
 
-export const initializeNostr = async () => {
+export const initializeNostr = async (): Promise<NDK> => {
   // If already initialized, return the NDK instance
   if (ndk && ndk.pool?.relays?.size > 0) {
     return ndk;
@@ -27,7 +27,7 @@ export const initializeNostr = async () => {
     try {
       // Create a new NDK instance with Nostr relays, but with auto-connections disabled
       // to prevent frequent permission prompts
-      ndk = new NDK({
+      const ndkInstance = new NDK({
         explicitRelayUrls: [
           'wss://relay.damus.io',
           'wss://nos.lol',
@@ -43,9 +43,10 @@ export const initializeNostr = async () => {
       });
 
       // Connect to the relays manually - this gives us more control
-      await ndk.connect();
+      await ndkInstance.connect();
       console.log('Connected to Nostr relays');
-      return ndk;
+      ndk = ndkInstance;
+      return ndkInstance;
     } catch (error) {
       console.error('Failed to connect to Nostr relays:', error);
       initializationPromise = null; // Reset so we can try again

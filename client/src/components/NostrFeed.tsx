@@ -165,37 +165,44 @@ export const NostrFeed: React.FC = () => {
     
     const post = posts[postIndex];
     
-    // Query Nostr relays for all interaction events related to this post
-    // These are all parallel queries to different Nostr event types
-    const [comments, likes, reposts, zapReceipts] = await Promise.all([
-      // Get comments (kind 1 events that reference the post)
-      ndk.fetchEvents({
-        kinds: [1],           // Regular notes as comments in Nostr
-        '#e': [postId]        // Events referencing this post ID (e-tag in Nostr protocol)
-      }),
-      // Get likes/reactions (kind 7 events)
-      ndk.fetchEvents({
-        kinds: [7],           // Reaction events in Nostr
-        '#e': [postId]        // Reference to the specific post
-      }),
-      // Get reposts (kind 6 events)
-      ndk.fetchEvents({
-        kinds: [6],           // Repost events in Nostr
-        '#e': [postId]        // Reference to the post being reposted
-      }),
-      // Get zap receipts (kind 9735 events)
-      ndk.fetchEvents({
-        kinds: [9735],        // Zap receipt events in Nostr
-        '#e': [postId]        // Reference to the post being zapped
-      })
-    ]);
+    try {
+      // Get NDK instance
+      const ndkInstance = await initializeNostr();
+      if (!ndkInstance) {
+        throw new Error('Could not initialize NDK for loading supplementary data');
+      }
+      
+      // Query Nostr relays for all interaction events related to this post
+      // These are all parallel queries to different Nostr event types
+      const [comments, likes, reposts, zapReceipts] = await Promise.all([
+        // Get comments (kind 1 events that reference the post)
+        ndkInstance.fetchEvents({
+          kinds: [1],           // Regular notes as comments in Nostr
+          '#e': [postId]        // Events referencing this post ID (e-tag in Nostr protocol)
+        }),
+        // Get likes/reactions (kind 7 events)
+        ndkInstance.fetchEvents({
+          kinds: [7],           // Reaction events in Nostr
+          '#e': [postId]        // Reference to the specific post
+        }),
+        // Get reposts (kind 6 events)
+        ndkInstance.fetchEvents({
+          kinds: [6],           // Repost events in Nostr
+          '#e': [postId]        // Reference to the post being reposted
+        }),
+        // Get zap receipts (kind 9735 events)
+        ndkInstance.fetchEvents({
+          kinds: [9735],        // Zap receipt events in Nostr
+          '#e': [postId]        // Reference to the post being zapped
+        })
+      ]);
 
-    const commentAuthors = [...new Set(Array.from(comments).map(c => c.pubkey))];
-    
-    const commentProfileEvents = commentAuthors.length > 0 ? await ndk.fetchEvents({
-      kinds: [0], // Metadata
-      authors: commentAuthors
-    }) : new Set();
+      const commentAuthors = [...new Set(Array.from(comments).map(c => c.pubkey))];
+      
+      const commentProfileEvents = commentAuthors.length > 0 ? await ndkInstance.fetchEvents({
+        kinds: [0], // Metadata
+        authors: commentAuthors
+      }) : new Set();
 
     const profileMap = new Map(
       Array.from(commentProfileEvents).map((profile) => {
@@ -286,6 +293,10 @@ export const NostrFeed: React.FC = () => {
       newPosts[postIndex] = updatedPost;
       return newPosts;
     });
+    
+    } catch (error) {
+      console.error('Error loading supplementary data:', error);
+    }
 
   }, [posts, loadedSupplementaryData]);
 
@@ -306,10 +317,10 @@ export const NostrFeed: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      // Initialize connection to Nostr relays (uses cache if already connected)
-      await initializeNostr();
-
-      if (!ndk) {
+      // Initialize connection to Nostr relays and get the NDK instance
+      const ndkInstance = await initializeNostr();
+      
+      if (!ndkInstance) {
         throw new Error('Could not connect to Nostr relays');
       }
       
@@ -346,8 +357,8 @@ export const NostrFeed: React.FC = () => {
       
       console.log('Querying Nostr relays with filter:', filter);
       
-      // Execute the query
-      const foodPosts = await ndk.fetchEvents(filter);
+      // Execute the query using the NDK instance we just got
+      const foodPosts = await ndkInstance.fetchEvents(filter);
       const postsArray = Array.from(foodPosts);
       
       console.log(`Received ${postsArray.length} posts from Nostr relays`);
@@ -421,67 +432,93 @@ export const NostrFeed: React.FC = () => {
     
     console.log('Setting up WebSocket handlers for Nostr feed events');
     
-    // Handle new posts coming in via WebSocket
-    const unsubscribeNewPost = subscribe('new_post', (data) => {
-      console.log('New Nostr post received via WebSocket:', data);
-      
-      // Convert the raw Nostr event into our post format
-      if (data && data.kind === 1) { // Only process kind 1 (text notes)
-        // Create an NDK event from the raw data for consistent processing
-        const ndkEvent = new NDKEvent(ndk);
-        Object.assign(ndkEvent, data);
-        
-        // Process the event into a post and add it to our feed
-        processBasicPostData([ndkEvent])
-          .then(processedPosts => {
-            if (processedPosts.length > 0) {
-              setPosts(currentPosts => {
-                // Check if we already have this post
-                if (currentPosts.some(p => p.id === processedPosts[0].id)) {
-                  return currentPosts; // Skip if duplicate
-                }
-                // Add new post at the top
-                return [processedPosts[0], ...currentPosts];
-              });
-            }
-          })
-          .catch(err => {
-            console.error('Error processing new post from WebSocket:', err);
-          });
-      }
-    });
-    
-    // Create an event subscription to relay relevant Nostr events to other clients
+    // Get the NDK instance for handling events
+    let ndkInstance: NDK | null = null;
     let subscription: any = null;
-    if (ndk) {
-      // Relay food-related events that we receive directly from Nostr relays
-      subscription = ndk.subscribe(
-        { kinds: [1], "#t": DIET_HASHTAGS },
-        { closeOnEose: false } // Keep subscription open
-      );
-      
-      subscription.on('event', (event: NDKEvent) => {
-        // Check if this is a new food-related event
-        const hasDietTag = event.tags?.some(tag => 
-          tag[0] === 't' && 
-          DIET_HASHTAGS.includes(tag[1])
+    
+    // Initialize NDK once for this effect
+    const setupNdk = async () => {
+      try {
+        ndkInstance = await initializeNostr();
+        
+        if (!ndkInstance) {
+          console.error('Could not initialize NDK for real-time events');
+          return;
+        }
+        
+        // Handle new posts coming in via WebSocket
+        const unsubscribeNewPost = subscribe('new_post', (data) => {
+          console.log('New Nostr post received via WebSocket:', data);
+          
+          // Convert the raw Nostr event into our post format
+          if (data && data.kind === 1) { // Only process kind 1 (text notes)
+            // Create an NDK event from the raw data for consistent processing
+            const ndkEvent = new NDKEvent(ndkInstance!);
+            Object.assign(ndkEvent, data);
+            
+            // Process the event into a post and add it to our feed
+            processBasicPostData([ndkEvent])
+              .then(processedPosts => {
+                if (processedPosts.length > 0) {
+                  setPosts(currentPosts => {
+                    // Check if we already have this post
+                    if (currentPosts.some(p => p.id === processedPosts[0].id)) {
+                      return currentPosts; // Skip if duplicate
+                    }
+                    // Add new post at the top
+                    return [processedPosts[0], ...currentPosts];
+                  });
+                }
+              })
+              .catch(err => {
+                console.error('Error processing new post from WebSocket:', err);
+              });
+          }
+        });
+        
+        // Create an event subscription to relay relevant Nostr events to other clients
+        subscription = ndkInstance.subscribe(
+          { kinds: [1], "#t": DIET_HASHTAGS },
+          { closeOnEose: false } // Keep subscription open
         );
         
-        if (hasDietTag && isConnected) {
-          // Relay this event to our server for distribution to other clients
-          sendNostrEvent(event.rawEvent());
-        }
-      });
-    }
-    
-    // Clean up the subscriptions when the component unmounts
-    return () => {
-      unsubscribeNewPost();
-      if (subscription) {
-        subscription.stop();
+        subscription.on('event', (event: NDKEvent) => {
+          // Check if this is a new food-related event
+          const hasDietTag = event.tags?.some(tag => 
+            tag[0] === 't' && 
+            DIET_HASHTAGS.includes(tag[1])
+          );
+          
+          if (hasDietTag && isConnected) {
+            // Relay this event to our server for distribution to other clients
+            sendNostrEvent(event.rawEvent());
+          }
+        });
+        
+        // Return a cleanup function that includes both WebSocket and NDK subscriptions
+        return () => {
+          unsubscribeNewPost();
+          if (subscription) {
+            subscription.stop();
+          }
+        };
+      } catch (error) {
+        console.error('Error setting up Nostr event handlers:', error);
+        return () => {}; // Return empty cleanup if setup failed
       }
     };
-  }, [ndk, processBasicPostData, subscribe, sendNostrEvent, isConnected]);
+    
+    // Call the setup function and store the cleanup
+    let cleanup: (() => void) | undefined;
+    setupNdk().then(cleanupFn => {
+      cleanup = cleanupFn;
+    });
+    
+    // Return a cleanup function that will run the stored cleanup if available
+    return () => {
+      if (cleanup) cleanup();
+    };
+  }, [processBasicPostData, subscribe, sendNostrEvent, isConnected]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -522,6 +559,12 @@ export const NostrFeed: React.FC = () => {
     }
 
     try {
+      // Get NDK instance
+      const ndkInstance = await initializeNostr();
+      if (!ndkInstance) {
+        throw new Error('Could not initialize NDK for like action');
+      }
+      
       const likeEvent = {
         kind: 7,
         created_at: Math.floor(Date.now() / 1000),
@@ -535,7 +578,7 @@ export const NostrFeed: React.FC = () => {
       const signedEvent = await window.nostr?.signEvent(likeEvent);
       if (!signedEvent) return;
 
-      const ndkEvent = new NDKEvent(ndk, signedEvent);
+      const ndkEvent = new NDKEvent(ndkInstance, signedEvent);
       await ndkEvent.publish();
 
       setUserLikes(prev => {
@@ -570,6 +613,12 @@ export const NostrFeed: React.FC = () => {
     }
 
     try {
+      // Get NDK instance
+      const ndkInstance = await initializeNostr();
+      if (!ndkInstance) {
+        throw new Error('Could not initialize NDK for repost action');
+      }
+      
       const repostEvent = {
         kind: 6,
         created_at: Math.floor(Date.now() / 1000),
@@ -583,7 +632,7 @@ export const NostrFeed: React.FC = () => {
       const signedEvent = await window.nostr?.signEvent(repostEvent);
       if (!signedEvent) return;
 
-      const ndkEvent = new NDKEvent(ndk, signedEvent);
+      const ndkEvent = new NDKEvent(ndkInstance, signedEvent);
       await ndkEvent.publish();
 
       setUserReposts(prev => {
@@ -667,6 +716,12 @@ export const NostrFeed: React.FC = () => {
     }
 
     try {
+      // Get NDK instance
+      const ndkInstance = await initializeNostr();
+      if (!ndkInstance) {
+        throw new Error('Could not initialize NDK for comment action');
+      }
+      
       const commentEvent = {
         kind: 1, // Regular note
         created_at: Math.floor(Date.now() / 1000),
@@ -680,7 +735,7 @@ export const NostrFeed: React.FC = () => {
       const signedEvent = await window.nostr?.signEvent(commentEvent);
       if (!signedEvent) return;
 
-      const ndkEvent = new NDKEvent(ndk, signedEvent);
+      const ndkEvent = new NDKEvent(ndkInstance, signedEvent);
       await ndkEvent.publish();
 
       // Get the user's profile
