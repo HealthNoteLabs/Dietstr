@@ -14,6 +14,8 @@ export const users = pgTable("users", {
       fat: number;
     };
     dietPlan?: 'carnivore' | 'keto' | 'fasting' | 'animal-based' | undefined;
+    streak?: number;
+    streakStartDate?: string;
     profile?: {
       weight?: number;
       height?: number;

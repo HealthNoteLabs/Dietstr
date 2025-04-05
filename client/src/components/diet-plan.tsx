@@ -155,9 +155,17 @@ export default function DietPlan({ userId, user }: DietPlanProps) {
       const currentPreferences = user?.preferences || {};
       
       // Update with new diet plan
+      // If diet plan is different, reset streak; otherwise maintain it
+      const isNewDietPlan = currentPreferences.dietPlan !== selectedPlan;
+      const now = new Date().toISOString();
+      
       const updatedPreferences = {
         ...currentPreferences,
-        dietPlan: selectedPlan
+        dietPlan: selectedPlan,
+        // If it's a new diet plan, reset streak to 1 (day 1), otherwise keep the existing streak
+        streak: isNewDietPlan ? 1 : (currentPreferences.streak || 1),
+        // If it's a new diet plan, set the streak start date to today
+        streakStartDate: isNewDietPlan ? now : (currentPreferences.streakStartDate || now)
       };
       
       // Send update to server
