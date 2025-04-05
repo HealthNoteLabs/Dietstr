@@ -8,7 +8,9 @@ import {
   insertWaterEntrySchema, 
   insertGroupSchema,
   insertGroupMemberSchema,
-  insertGroupInviteSchema
+  insertGroupInviteSchema,
+  FoodEntry,
+  WaterEntry
 } from "@shared/schema";
 
 // Interface for tracking Nostr relay subscriptions
@@ -250,10 +252,44 @@ export async function registerRoutes(app: Express) {
       res.status(400).json({ error: "Invalid preferences data" });
     }
   });
+  
+  app.put("/api/users/:pubkey/preferences", async (req, res) => {
+    try {
+      const pubkey = req.params.pubkey;
+      const user = await storage.getUser(pubkey);
+      
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      
+      const updatedUser = await storage.updateUserPreferences(user.id, req.body.preferences);
+      res.json(updatedUser);
+    } catch (error) {
+      console.error("Error updating user preferences:", error);
+      res.status(400).json({ error: "Failed to update preferences" });
+    }
+  });
 
   app.get("/api/food-entries", async (req, res) => {
     const userId = parseInt(req.query.userId as string);
     const date = new Date(req.query.date as string);
+    
+    // Check if range parameter is provided for historical data
+    if (req.query.range) {
+      const range = parseInt(req.query.range as string);
+      const entries: FoodEntry[] = [];
+      
+      // Fetch entries for each day in the range
+      for (let i = 0; i < range; i++) {
+        const checkDate = new Date(date);
+        checkDate.setDate(checkDate.getDate() + i);
+        const dailyEntries = await storage.getFoodEntries(userId, checkDate);
+        entries.push(...dailyEntries);
+      }
+      
+      return res.json(entries);
+    }
+    
     const entries = await storage.getFoodEntries(userId, date);
     res.json(entries);
   });
@@ -271,6 +307,23 @@ export async function registerRoutes(app: Express) {
   app.get("/api/water-entries", async (req, res) => {
     const userId = parseInt(req.query.userId as string);
     const date = new Date(req.query.date as string);
+    
+    // Check if range parameter is provided for historical data
+    if (req.query.range) {
+      const range = parseInt(req.query.range as string);
+      const entries: WaterEntry[] = [];
+      
+      // Fetch entries for each day in the range
+      for (let i = 0; i < range; i++) {
+        const checkDate = new Date(date);
+        checkDate.setDate(checkDate.getDate() + i);
+        const dailyEntries = await storage.getWaterEntries(userId, checkDate);
+        entries.push(...dailyEntries);
+      }
+      
+      return res.json(entries);
+    }
+    
     const entries = await storage.getWaterEntries(userId, date);
     res.json(entries);
   });

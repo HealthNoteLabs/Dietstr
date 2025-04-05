@@ -6,8 +6,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DailyLog from "@/components/daily-log";
 import NutritionSummary from "@/components/nutrition-summary";
 import WaterTracker from "@/components/water-tracker";
+import DietPlan from "@/components/diet-plan";
 import { Button } from "@/components/ui/button";
-import { LogOut, ListPlus, Activity, Droplets, Menu, Rss } from "lucide-react";
+import { LogOut, ListPlus, Activity, Droplets, Menu, Rss, Utensils } from "lucide-react";
 import { User } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { isNativeApp, getPreference, removePreference } from "../capacitor";
@@ -91,6 +92,16 @@ export default function Dashboard() {
                     <SheetClose asChild>
                       <Button 
                         variant="ghost" 
+                        onClick={() => setActiveTab("diet")}
+                        className="justify-start w-full"
+                      >
+                        <Utensils className="h-4 w-4 mr-2" />
+                        Diet Plan
+                      </Button>
+                    </SheetClose>
+                    <SheetClose asChild>
+                      <Button 
+                        variant="ghost" 
                         onClick={() => setActiveTab("nutrition")}
                         className="justify-start w-full"
                       >
@@ -127,7 +138,11 @@ export default function Dashboard() {
 
         <main className="flex-1 container px-3 py-4">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid grid-cols-3 mb-4">
+            <TabsList className="grid grid-cols-4 mb-4">
+              <TabsTrigger value="diet">
+                <Utensils className="h-4 w-4 mr-2" />
+                <span className="sr-only sm:not-sr-only">Diet</span>
+              </TabsTrigger>
               <TabsTrigger value="nutrition">
                 <Activity className="h-4 w-4 mr-2" />
                 <span className="sr-only sm:not-sr-only">Nutrition</span>
@@ -141,6 +156,17 @@ export default function Dashboard() {
                 <span className="sr-only sm:not-sr-only">Food Log</span>
               </TabsTrigger>
             </TabsList>
+            
+            <TabsContent value="diet" className="mt-0">
+              <Card>
+                <CardContent className="p-4 pt-4">
+                  <DietPlan 
+                    userId={user?.id}
+                    user={user}
+                  />
+                </CardContent>
+              </Card>
+            </TabsContent>
             
             <TabsContent value="nutrition" className="mt-0">
               <Card>
@@ -192,11 +218,9 @@ export default function Dashboard() {
           <div className="space-y-6">
             <Card>
               <CardContent className="p-6">
-                <NutritionSummary 
-                  date={selectedDate}
+                <DietPlan 
                   userId={user?.id}
-                  goals={user?.preferences?.macroGoals}
-                  calorieGoal={user?.preferences?.dailyCalorieGoal}
+                  user={user}
                 />
               </CardContent>
             </Card>
@@ -212,15 +236,28 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          <Card className="h-fit">
-            <CardContent className="p-6">
-              <DailyLog
-                date={selectedDate}
-                onDateChange={setSelectedDate}
-                userId={user?.id}
-              />
-            </CardContent>
-          </Card>
+          <div className="space-y-6">
+            <Card>
+              <CardContent className="p-6">
+                <NutritionSummary 
+                  date={selectedDate}
+                  userId={user?.id}
+                  goals={user?.preferences?.macroGoals}
+                  calorieGoal={user?.preferences?.dailyCalorieGoal}
+                />
+              </CardContent>
+            </Card>
+
+            <Card className="h-fit">
+              <CardContent className="p-6">
+                <DailyLog
+                  date={selectedDate}
+                  onDateChange={setSelectedDate}
+                  userId={user?.id}
+                />
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </main>
     </div>

@@ -1,5 +1,7 @@
 import { useState, useEffect, useContext } from 'react';
 import { NostrContext } from '../contexts/NostrContext';
+import { useQuery } from '@tanstack/react-query';
+import { User } from '@shared/schema';
 
 interface Wallet {
   available: boolean;
@@ -11,6 +13,12 @@ export const useAuth = () => {
   const { userPubkey } = useContext(NostrContext);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [wallet, setWallet] = useState<Wallet>({ available: false });
+
+  // Fetch the user data from the backend
+  const { data: user } = useQuery<User>({
+    queryKey: [`/api/users/${userPubkey}`],
+    enabled: !!userPubkey,
+  });
 
   useEffect(() => {
     // Check if user is logged in (has Nostr extension and public key)
@@ -66,6 +74,7 @@ export const useAuth = () => {
     isLoggedIn,
     login,
     wallet,
-    userPubkey
+    userPubkey,
+    user
   };
 };

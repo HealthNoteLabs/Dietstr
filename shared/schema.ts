@@ -13,6 +13,7 @@ export const users = pgTable("users", {
       carbs: number;
       fat: number;
     };
+    dietPlan?: 'carnivore' | 'keto' | 'fasting' | 'animal-based' | undefined;
   }>(),
 });
 

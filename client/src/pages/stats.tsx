@@ -1,473 +1,445 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAuth } from "@/hooks/useAuth";
 import { User, FoodEntry, WaterEntry } from "@shared/schema";
 import { Progress } from "@/components/ui/progress";
-import { CalendarDays, Droplets, Flame, Trophy, TrendingUp } from "lucide-react";
-import { format, subDays, isSameDay, startOfWeek, endOfWeek, eachDayOfInterval } from "date-fns";
-import { isNativeApp, getPreference } from "../capacitor";
-import { getPrivateKeyFromNsec, getPubKeyFromPrivateKey } from "@/lib/nostr";
-import { useToast } from "@/hooks/use-toast";
-import { useLocation } from "wouter";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-interface Streak {
-  name: string;
-  currentStreak: number;
-  longestStreak: number;
-  icon: React.ReactNode;
-  color: string;
-}
+import { CalendarIcon, DropletIcon, FlameIcon, TrendingUpIcon, Utensils, Beef, Salad } from "lucide-react";
+import { format, subDays, isWithinInterval, startOfDay, endOfDay, differenceInDays } from "date-fns";
 
 export default function StatsPage() {
-  const [, setLocation] = useLocation();
-  const [pubkey, setPubkey] = useState<string | null>(null);
-  const [timeRange, setTimeRange] = useState<string>("week");
-  const { toast } = useToast();
-  const isNative = isNativeApp();
+  const { user } = useAuth();
+  const [streaks, setStreaks] = useState({
+    current: {
+      diet: 0,
+      water: 0,
+      logging: 0,
+    },
+    longest: {
+      diet: 0,
+      water: 0,
+      logging: 0,
+    }
+  });
 
-  // Get pubkey on mount (same as in dashboard)
+  // Fetch food entries for the last 30 days
+  const { data: foodEntries30Days } = useQuery<FoodEntry[]>({
+    queryKey: ['/api/food-entries-history', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      const dateParam = `${thirtyDaysAgo.toISOString().split('T')[0]}`;
+      
+      const response = await fetch(`/api/food-entries?userId=${user.id}&date=${dateParam}&range=30`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch food entries');
+      }
+      return response.json();
+    },
+    enabled: !!user?.id,
+  });
+
+  // Fetch water entries for the last 30 days
+  const { data: waterEntries30Days } = useQuery<WaterEntry[]>({
+    queryKey: ['/api/water-entries-history', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      
+      const dateParam = `${thirtyDaysAgo.toISOString().split('T')[0]}`;
+      
+      const response = await fetch(`/api/water-entries?userId=${user.id}&date=${dateParam}&range=30`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch water entries');
+      }
+      return response.json();
+    },
+    enabled: !!user?.id,
+  });
+
+  // Calculate streaks when data changes
   useEffect(() => {
-    async function getPubkey() {
-      try {
-        // For native apps, check if we have a stored key
-        if (isNative) {
-          const savedKey = await getPreference("nostr_nsec");
-          if (savedKey) {
-            // Use the saved key
-            const privateKey = getPrivateKeyFromNsec(savedKey);
-            const key = getPubKeyFromPrivateKey(privateKey);
-            setPubkey(key);
-            return;
-          }
-        }
-        
-        // For browser extension
-        if (!window.nostr) {
-          throw new Error("No Nostr extension found");
-        }
-        const key = await window.nostr.getPublicKey();
-        setPubkey(key);
-      } catch (error) {
-        toast({
-          title: "Error",
-          description: "Failed to get Nostr public key. Please try logging in again.",
-          variant: "destructive",
-        });
-        setLocation("/");
-      }
-    }
-    getPubkey();
-  }, [setLocation, toast, isNative]);
+    if (!user || !foodEntries30Days || !waterEntries30Days) return;
 
-  // Get user data
-  const { data: user } = useQuery<User>({
-    queryKey: [`/api/users/${pubkey}`],
-    enabled: !!pubkey,
-  });
-
-  // Get food entries for stats
-  const { data: foodEntries } = useQuery<FoodEntry[]>({
-    queryKey: ['/api/food-entries'],
-    enabled: !!user?.id,
-  });
-
-  // Get water entries for stats
-  const { data: waterEntries } = useQuery<WaterEntry[]>({
-    queryKey: ['/api/water-entries'],
-    enabled: !!user?.id,
-  });
-
-  // Calculate date range for filtered data
-  const getDateRange = () => {
-    const now = new Date();
-    switch (timeRange) {
-      case "week":
-        return {
-          start: startOfWeek(now, { weekStartsOn: 1 }),
-          end: endOfWeek(now, { weekStartsOn: 1 }),
-        };
-      case "month":
-        return {
-          start: new Date(now.getFullYear(), now.getMonth(), 1),
-          end: new Date(now.getFullYear(), now.getMonth() + 1, 0),
-        };
-      case "year":
-        return {
-          start: new Date(now.getFullYear(), 0, 1),
-          end: new Date(now.getFullYear(), 11, 31),
-        };
-      default:
-        return {
-          start: subDays(now, 7),
-          end: now,
-        };
-    }
-  };
-
-  const dateRange = getDateRange();
-  
-  // Filter entries by date range
-  const filteredFoodEntries = foodEntries?.filter(entry => {
-    const entryDate = new Date(entry.date);
-    return entryDate >= dateRange.start && entryDate <= dateRange.end;
-  }) || [];
-
-  const filteredWaterEntries = waterEntries?.filter(entry => {
-    const entryDate = new Date(entry.date);
-    return entryDate >= dateRange.start && entryDate <= dateRange.end;
-  }) || [];
-
-  // Calculate calorie stats
-  const calculateCalorieStats = () => {
-    if (!filteredFoodEntries.length) return { average: 0, min: 0, max: 0, total: 0 };
-    
-    const dailyCalories: { [date: string]: number } = {};
-    
-    filteredFoodEntries.forEach(entry => {
-      const dateStr = format(new Date(entry.date), 'yyyy-MM-dd');
-      if (!dailyCalories[dateStr]) {
-        dailyCalories[dateStr] = 0;
-      }
-      dailyCalories[dateStr] += entry.calories;
-    });
-    
-    const values = Object.values(dailyCalories);
-    const total = values.reduce((sum, val) => sum + val, 0);
-    const average = values.length ? Math.round(total / values.length) : 0;
-    const min = values.length ? Math.min(...values) : 0;
-    const max = values.length ? Math.max(...values) : 0;
-    
-    return { average, min, max, total };
-  };
-
-  // Calculate water stats
-  const calculateWaterStats = () => {
-    if (!filteredWaterEntries.length) return { average: 0, min: 0, max: 0, total: 0 };
-    
-    const dailyWater: { [date: string]: number } = {};
-    
-    filteredWaterEntries.forEach(entry => {
-      const dateStr = format(new Date(entry.date), 'yyyy-MM-dd');
-      if (!dailyWater[dateStr]) {
-        dailyWater[dateStr] = 0;
-      }
-      dailyWater[dateStr] += entry.amount;
-    });
-    
-    const values = Object.values(dailyWater);
-    const total = values.reduce((sum, val) => sum + val, 0);
-    const average = values.length ? Math.round(total / values.length) : 0;
-    const min = values.length ? Math.min(...values) : 0;
-    const max = values.length ? Math.max(...values) : 0;
-    
-    return { average, min, max, total };
-  };
-
-  // Calculate streaks
-  const calculateStreaks = (): Streak[] => {
-    // Helper function to check if an array of dates has no gaps
-    const checkConsecutiveDays = (dates: Date[]): number => {
-      if (dates.length === 0) return 0;
-      
-      // Sort dates in descending order
-      dates.sort((a, b) => b.getTime() - a.getTime());
-      
-      let currentStreak = 1;
-      const today = new Date();
-      
-      // Check if the most recent date is today or yesterday
-      if (!isSameDay(dates[0], today) && !isSameDay(dates[0], subDays(today, 1))) {
-        return 0;
-      }
-      
-      // Count consecutive days
-      for (let i = 0; i < dates.length - 1; i++) {
-        const current = dates[i];
-        const next = dates[i + 1];
-        
-        // Check if the next date is exactly one day before the current
-        if (isSameDay(subDays(current, 1), next)) {
-          currentStreak++;
-        } else {
-          break;
-        }
-      }
-      
-      return currentStreak;
+    // Helper function to group entries by date
+    const groupByDate = (entries: { date: string | Date }[]) => {
+      const grouped: Record<string, boolean> = {};
+      entries.forEach(entry => {
+        const dateStr = new Date(entry.date).toISOString().split('T')[0];
+        grouped[dateStr] = true;
+      });
+      return grouped;
     };
 
-    // For demonstration, create some mock streaks
-    // In a real app, these would be calculated from actual user data
-    const streaks: Streak[] = [];
+    const foodEntriesByDate = groupByDate(foodEntries30Days);
+    const waterEntriesByDate = groupByDate(waterEntries30Days);
     
-    // Fasting streak - assuming under 1500 calories counts as fasting day
-    if (foodEntries) {
-      const fastingDates: Date[] = [];
-      const dailyCalories: { [date: string]: number } = {};
+    // Calculate current streaks
+    let currentDietStreak = 0;
+    let currentWaterStreak = 0;
+    let currentLoggingStreak = 0;
+    
+    // Calculate longest streaks
+    let longestDietStreak = 0;
+    let longestWaterStreak = 0;
+    let longestLoggingStreak = 0;
+    
+    let tempDietStreak = 0;
+    let tempWaterStreak = 0;
+    let tempLoggingStreak = 0;
+    
+    // Iterate over the last 30 days in reverse (from today backward)
+    for (let i = 0; i < 30; i++) {
+      const checkDate = subDays(new Date(), i);
+      const dateStr = checkDate.toISOString().split('T')[0];
       
-      foodEntries.forEach(entry => {
-        const dateStr = format(new Date(entry.date), 'yyyy-MM-dd');
-        if (!dailyCalories[dateStr]) {
-          dailyCalories[dateStr] = 0;
-        }
-        dailyCalories[dateStr] += entry.calories;
-      });
+      const hasFoodEntry = foodEntriesByDate[dateStr];
+      const hasWaterEntry = waterEntriesByDate[dateStr];
+      const hasAnyEntry = hasFoodEntry || hasWaterEntry;
       
-      // Check which days have under 1500 calories
-      for (const [dateStr, calories] of Object.entries(dailyCalories)) {
-        if (calories < 1500) {
-          fastingDates.push(new Date(dateStr));
+      // Check if diet plan was followed (based on food entries matching the diet plan)
+      let followedDietPlan = false;
+      if (user?.preferences?.dietPlan && hasFoodEntry) {
+        const dietPlan = user.preferences.dietPlan;
+        
+        // Simple heuristic based on meal names, can be enhanced with more data
+        const entriesForDate = foodEntries30Days.filter(
+          entry => new Date(entry.date).toISOString().split('T')[0] === dateStr
+        );
+        
+        if (dietPlan === 'carnivore') {
+          // All food entries should be animal products for carnivore
+          followedDietPlan = entriesForDate.every(entry => 
+            /meat|beef|chicken|fish|pork|lamb|eggs|bacon|turkey|sausage|steak/.test(entry.name.toLowerCase())
+          );
+        } else if (dietPlan === 'keto') {
+          // All food entries should be low-carb for keto
+          const hasHighCarbFood = entriesForDate.some(entry =>
+            /bread|pasta|rice|potato|sugar|cake|cookie|donut|pizza|cereal|fries/.test(entry.name.toLowerCase())
+          );
+          followedDietPlan = !hasHighCarbFood;
+        } else if (dietPlan === 'fasting') {
+          // For fasting, we check if they have limited entries (1-2) during expected eating window
+          followedDietPlan = entriesForDate.length <= 2;
+        } else if (dietPlan === 'animal-based') {
+          // Predominantly animal products with some low-toxicity fruits
+          const animalBasedRatio = entriesForDate.filter(entry => 
+            /meat|beef|chicken|fish|pork|lamb|eggs|bacon|turkey|sausage|steak|honey|fruit/.test(entry.name.toLowerCase())
+          ).length / entriesForDate.length;
+          
+          followedDietPlan = animalBasedRatio >= 0.8; // 80% or more animal-based foods
         }
       }
       
-      const currentFastingStreak = checkConsecutiveDays(fastingDates);
-      streaks.push({
-        name: "Fasting",
-        currentStreak: currentFastingStreak,
-        longestStreak: Math.max(currentFastingStreak, 14), // Mock value for longest
-        icon: <Flame className="h-5 w-5" />,
-        color: "text-orange-500"
-      });
-    }
-    
-    // Carnivore streak - assuming meals with meat category would count
-    if (foodEntries) {
-      const carnivoreDates: Date[] = [];
-      const dailyProteinGrams: { [date: string]: number } = {};
-      
-      foodEntries.forEach(entry => {
-        const dateStr = format(new Date(entry.date), 'yyyy-MM-dd');
-        if (!dailyProteinGrams[dateStr]) {
-          dailyProteinGrams[dateStr] = 0;
+      // For days without entries: if it's today or yesterday, we don't break the streak
+      // For older days, we break the streak
+      if (i <= 1) {
+        // For today and yesterday, continue regardless
+        if (followedDietPlan || !user?.preferences?.dietPlan) tempDietStreak++;
+        if (hasWaterEntry) tempWaterStreak++;
+        if (hasAnyEntry) tempLoggingStreak++;
+      } else {
+        // For older days, only continue if there are entries
+        if (followedDietPlan) {
+          tempDietStreak++;
+        } else {
+          // Reset streak counter if plan wasn't followed or user has no plan
+          if (tempDietStreak > longestDietStreak) longestDietStreak = tempDietStreak;
+          tempDietStreak = 0;
         }
-        dailyProteinGrams[dateStr] += entry.protein || 0;
-      });
-      
-      // Check which days have high protein (carnivore indicator)
-      for (const [dateStr, protein] of Object.entries(dailyProteinGrams)) {
-        if (protein > 100) { // Assuming high protein indicates carnivore diet
-          carnivoreDates.push(new Date(dateStr));
+        
+        if (hasWaterEntry) {
+          tempWaterStreak++;
+        } else {
+          if (tempWaterStreak > longestWaterStreak) longestWaterStreak = tempWaterStreak;
+          tempWaterStreak = 0;
         }
-      }
-      
-      const currentCarnivoreStreak = checkConsecutiveDays(carnivoreDates);
-      streaks.push({
-        name: "Carnivore",
-        currentStreak: currentCarnivoreStreak,
-        longestStreak: Math.max(currentCarnivoreStreak, 21), // Mock value for longest
-        icon: <TrendingUp className="h-5 w-5" />,
-        color: "text-red-500"
-      });
-    }
-    
-    // Custom plan streak - assuming user goal calories
-    if (foodEntries && user?.preferences?.dailyCalorieGoal) {
-      const planDates: Date[] = [];
-      const dailyCalories: { [date: string]: number } = {};
-      const goalCalories = user.preferences.dailyCalorieGoal;
-      
-      foodEntries.forEach(entry => {
-        const dateStr = format(new Date(entry.date), 'yyyy-MM-dd');
-        if (!dailyCalories[dateStr]) {
-          dailyCalories[dateStr] = 0;
-        }
-        dailyCalories[dateStr] += entry.calories;
-      });
-      
-      // Check which days are within 10% of calorie goal
-      for (const [dateStr, calories] of Object.entries(dailyCalories)) {
-        if (calories >= goalCalories * 0.9 && calories <= goalCalories * 1.1) {
-          planDates.push(new Date(dateStr));
+        
+        if (hasAnyEntry) {
+          tempLoggingStreak++;
+        } else {
+          if (tempLoggingStreak > longestLoggingStreak) longestLoggingStreak = tempLoggingStreak;
+          tempLoggingStreak = 0;
         }
       }
       
-      const currentPlanStreak = checkConsecutiveDays(planDates);
-      streaks.push({
-        name: "Custom Plan",
-        currentStreak: currentPlanStreak,
-        longestStreak: Math.max(currentPlanStreak, 30), // Mock value for longest
-        icon: <Trophy className="h-5 w-5" />,
-        color: "text-green-500"
-      });
+      // Current streak is only counted for consecutive days including today
+      if (i === 0 && followedDietPlan) currentDietStreak = tempDietStreak;
+      if (i === 0 && hasWaterEntry) currentWaterStreak = tempWaterStreak;
+      if (i === 0 && hasAnyEntry) currentLoggingStreak = tempLoggingStreak;
     }
     
-    return streaks;
+    // Final check for longest streaks
+    if (tempDietStreak > longestDietStreak) longestDietStreak = tempDietStreak;
+    if (tempWaterStreak > longestWaterStreak) longestWaterStreak = tempWaterStreak;
+    if (tempLoggingStreak > longestLoggingStreak) longestLoggingStreak = tempLoggingStreak;
+    
+    setStreaks({
+      current: {
+        diet: currentDietStreak,
+        water: currentWaterStreak,
+        logging: currentLoggingStreak,
+      },
+      longest: {
+        diet: longestDietStreak,
+        water: longestWaterStreak,
+        logging: longestLoggingStreak,
+      }
+    });
+  }, [user, foodEntries30Days, waterEntries30Days]);
+
+  // Get current diet plan icon
+  const getDietIcon = () => {
+    switch(user?.preferences?.dietPlan) {
+      case 'carnivore':
+        return <Beef className="h-6 w-6 text-red-500" />;
+      case 'keto':
+        return <FlameIcon className="h-6 w-6 text-orange-500" />;
+      case 'fasting':
+        return <Utensils className="h-6 w-6 text-blue-500" />;
+      case 'animal-based':
+        return <Salad className="h-6 w-6 text-green-500" />;
+      default:
+        return <FlameIcon className="h-6 w-6 text-purple-500" />;
+    }
   };
 
-  const calorieStats = calculateCalorieStats();
-  const waterStats = calculateWaterStats();
-  const streaks = calculateStreaks();
+  // Calculate nutrition averages for the last 7 days
+  const calculateNutritionAverages = () => {
+    if (!foodEntries30Days?.length) return { calories: 0, protein: 0, carbs: 0, fat: 0 };
+    
+    const sevenDaysAgo = subDays(new Date(), 7);
+    const recentEntries = foodEntries30Days.filter(entry => 
+      new Date(entry.date) >= sevenDaysAgo
+    );
+    
+    if (recentEntries.length === 0) return { calories: 0, protein: 0, carbs: 0, fat: 0 };
+    
+    const totalCalories = recentEntries.reduce((sum, entry) => sum + entry.calories, 0);
+    
+    // Filter out entries with missing macros before calculating
+    const entriesWithProtein = recentEntries.filter(entry => entry.protein !== null);
+    const entriesWithCarbs = recentEntries.filter(entry => entry.carbs !== null);
+    const entriesWithFat = recentEntries.filter(entry => entry.fat !== null);
+    
+    const totalProtein = entriesWithProtein.reduce((sum, entry) => sum + (entry.protein || 0), 0);
+    const totalCarbs = entriesWithCarbs.reduce((sum, entry) => sum + (entry.carbs || 0), 0);
+    const totalFat = entriesWithFat.reduce((sum, entry) => sum + (entry.fat || 0), 0);
+    
+    // Get number of unique days with entries
+    const uniqueDays = new Set(recentEntries.map(entry => 
+      new Date(entry.date).toISOString().split('T')[0]
+    )).size;
+    
+    return {
+      calories: Math.round(totalCalories / uniqueDays) || 0,
+      protein: Math.round(totalProtein / uniqueDays) || 0,
+      carbs: Math.round(totalCarbs / uniqueDays) || 0,
+      fat: Math.round(totalFat / uniqueDays) || 0,
+    };
+  };
+
+  // Calculate water average for the last 7 days
+  const calculateWaterAverage = () => {
+    if (!waterEntries30Days?.length) return 0;
+    
+    const sevenDaysAgo = subDays(new Date(), 7);
+    const recentEntries = waterEntries30Days.filter(entry => 
+      new Date(entry.date) >= sevenDaysAgo
+    );
+    
+    if (recentEntries.length === 0) return 0;
+    
+    const totalWater = recentEntries.reduce((sum, entry) => sum + entry.amount, 0);
+    
+    // Get number of unique days with entries
+    const uniqueDays = new Set(recentEntries.map(entry => 
+      new Date(entry.date).toISOString().split('T')[0]
+    )).size;
+    
+    return Math.round(totalWater / uniqueDays) || 0;
+  };
+
+  const nutritionAverages = calculateNutritionAverages();
+  const waterAverage = calculateWaterAverage();
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="mb-6 flex justify-between items-center">
-        <h1 className="text-3xl font-bold mb-1">Statistics</h1>
-        <Select value={timeRange} onValueChange={setTimeRange}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Select time range" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="week">This Week</SelectItem>
-            <SelectItem value="month">This Month</SelectItem>
-            <SelectItem value="year">This Year</SelectItem>
-          </SelectContent>
-        </Select>
+    <div className="container max-w-4xl mx-auto py-6 px-4 sm:px-6 space-y-6">
+      <h1 className="text-3xl font-bold tracking-tight mb-6">Diet Stats & Streaks</h1>
+      
+      {/* Weekly Averages */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FlameIcon className="h-5 w-5 text-orange-500" />
+              Nutrition (7-day avg)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span>Calories</span>
+                <span className="font-medium">{nutritionAverages.calories} kcal</span>
+              </div>
+              <Progress value={
+                user?.preferences?.dailyCalorieGoal
+                  ? (nutritionAverages.calories / user.preferences.dailyCalorieGoal) * 100
+                  : 50
+              } />
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 pt-2">
+              <div className="space-y-1">
+                <span className="text-sm text-muted-foreground">Protein</span>
+                <p className="font-medium">{nutritionAverages.protein}g</p>
+              </div>
+              <div className="space-y-1">
+                <span className="text-sm text-muted-foreground">Carbs</span>
+                <p className="font-medium">{nutritionAverages.carbs}g</p>
+              </div>
+              <div className="space-y-1">
+                <span className="text-sm text-muted-foreground">Fat</span>
+                <p className="font-medium">{nutritionAverages.fat}g</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <DropletIcon className="h-5 w-5 text-blue-500" />
+              Water Intake (7-day avg)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span>Daily Water</span>
+                <span className="font-medium">{waterAverage} ml</span>
+              </div>
+              <Progress value={
+                user?.preferences?.waterGoal
+                  ? (waterAverage / user.preferences.waterGoal) * 100
+                  : 50
+              } />
+            </div>
+            
+            <div className="pt-2">
+              {user?.preferences?.waterGoal ? (
+                <p className="text-sm text-muted-foreground">
+                  {waterAverage < user.preferences.waterGoal 
+                    ? `${user.preferences.waterGoal - waterAverage} ml below your daily goal`
+                    : `${waterAverage - user.preferences.waterGoal} ml above your daily goal`
+                  }
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">Set a water goal in your preferences</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
       
-      <Tabs defaultValue="nutrition">
-        <TabsList className="mb-6">
-          <TabsTrigger value="nutrition">Nutrition Stats</TabsTrigger>
-          <TabsTrigger value="streaks">Streaks</TabsTrigger>
-        </TabsList>
-        
-        <TabsContent value="nutrition">
-          <div className="grid gap-6 md:grid-cols-2">
-            {/* Calorie Stats Card */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center text-lg">
-                  <Flame className="h-5 w-5 mr-2 text-orange-500" />
-                  Calorie Statistics
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-sm text-muted-foreground">Daily Average</div>
-                      <div className="text-2xl font-bold">{calorieStats.average}</div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-sm text-muted-foreground">Total</div>
-                      <div className="text-2xl font-bold">{calorieStats.total}</div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-sm text-muted-foreground">Min</div>
-                      <div className="text-2xl font-bold">{calorieStats.min}</div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-sm text-muted-foreground">Max</div>
-                      <div className="text-2xl font-bold">{calorieStats.max}</div>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm text-muted-foreground">Average vs Goal</span>
-                      <span className="text-sm font-medium">
-                        {calorieStats.average} / {user?.preferences?.dailyCalorieGoal || 2000}
-                      </span>
-                    </div>
-                    <Progress 
-                      value={Math.min(100, (calorieStats.average / (user?.preferences?.dailyCalorieGoal || 2000)) * 100)} 
-                      className="h-2"
-                    />
-                  </div>
+      {/* Streak Cards */}
+      <h2 className="text-xl font-bold mt-6 mb-3">Your Streaks</h2>
+      
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {user?.preferences?.dietPlan && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg flex items-center gap-2">
+                {getDietIcon()}
+                Diet Plan Streak
+              </CardTitle>
+              <CardDescription>
+                {user?.preferences?.dietPlan 
+                  ? `${user.preferences.dietPlan.charAt(0).toUpperCase() + user.preferences.dietPlan.slice(1)} diet`
+                  : "No diet plan selected"
+                }
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-3xl font-bold">{streaks.current.diet}</p>
+                  <p className="text-muted-foreground text-sm">Current days</p>
                 </div>
-              </CardContent>
-            </Card>
-            
-            {/* Water Stats Card */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center text-lg">
-                  <Droplets className="h-5 w-5 mr-2 text-blue-500" />
-                  Water Statistics
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-sm text-muted-foreground">Daily Average</div>
-                      <div className="text-2xl font-bold">{waterStats.average} ml</div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-sm text-muted-foreground">Total</div>
-                      <div className="text-2xl font-bold">{waterStats.total} ml</div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-sm text-muted-foreground">Min</div>
-                      <div className="text-2xl font-bold">{waterStats.min} ml</div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-sm text-muted-foreground">Max</div>
-                      <div className="text-2xl font-bold">{waterStats.max} ml</div>
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-sm text-muted-foreground">Average vs Goal</span>
-                      <span className="text-sm font-medium">
-                        {waterStats.average} / {user?.preferences?.waterGoal || 2000} ml
-                      </span>
-                    </div>
-                    <Progress 
-                      value={Math.min(100, (waterStats.average / (user?.preferences?.waterGoal || 2000)) * 100)} 
-                      className="h-2"
-                    />
-                  </div>
+                <div>
+                  <p className="text-xl font-semibold">{streaks.longest.diet}</p>
+                  <p className="text-muted-foreground text-sm">Longest streak</p>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-        
-        <TabsContent value="streaks">
-          <div className="grid gap-6 md:grid-cols-2">
-            {/* Streaks Cards */}
-            {streaks.map((streak, index) => (
-              <Card key={index}>
-                <CardHeader className="pb-2">
-                  <CardTitle className={`flex items-center text-lg ${streak.color}`}>
-                    {streak.icon}
-                    <span className="ml-2">{streak.name} Streak</span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="bg-muted rounded-lg p-3">
-                        <div className="text-sm text-muted-foreground">Current Streak</div>
-                        <div className="text-2xl font-bold">{streak.currentStreak} days</div>
-                      </div>
-                      <div className="bg-muted rounded-lg p-3">
-                        <div className="text-sm text-muted-foreground">Longest Streak</div>
-                        <div className="text-2xl font-bold">{streak.longestStreak} days</div>
-                      </div>
-                    </div>
-                    
-                    <div>
-                      <div className="flex items-center text-sm text-muted-foreground mb-2">
-                        <CalendarDays className="h-4 w-4 mr-2" />
-                        Progress
-                      </div>
-                      <Progress 
-                        value={Math.min(100, (streak.currentStreak / streak.longestStreak) * 100)} 
-                        className="h-2"
-                      />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-            
-            {/* Show message if no streaks */}
-            {streaks.length === 0 && (
-              <Card className="col-span-2">
-                <CardContent className="p-6 text-center">
-                  <div className="text-muted-foreground">
-                    No streak data available yet. Start tracking your diet and activity to see your streaks here.
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        </TabsContent>
-      </Tabs>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <DropletIcon className="h-5 w-5 text-blue-500" />
+              Water Tracking
+            </CardTitle>
+            <CardDescription>
+              Daily water intake logging
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-3xl font-bold">{streaks.current.water}</p>
+                <p className="text-muted-foreground text-sm">Current days</p>
+              </div>
+              <div>
+                <p className="text-xl font-semibold">{streaks.longest.water}</p>
+                <p className="text-muted-foreground text-sm">Longest streak</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <CalendarIcon className="h-5 w-5 text-green-500" />
+              Logging Streak
+            </CardTitle>
+            <CardDescription>
+              Days with any nutrition tracking
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-3xl font-bold">{streaks.current.logging}</p>
+                <p className="text-muted-foreground text-sm">Current days</p>
+              </div>
+              <div>
+                <p className="text-xl font-semibold">{streaks.longest.logging}</p>
+                <p className="text-muted-foreground text-sm">Longest streak</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* If no diet plan is selected, show recommendation */}
+      {!user?.preferences?.dietPlan && (
+        <Card className="mt-4 border-dashed">
+          <CardHeader>
+            <CardTitle>Choose a Diet Plan</CardTitle>
+            <CardDescription>
+              Select a diet plan on the dashboard to track your adherence streak and get diet-specific recommendations.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
     </div>
   );
 }
