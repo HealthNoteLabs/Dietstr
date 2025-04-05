@@ -20,7 +20,7 @@ export default function Dashboard() {
   const [, setLocation] = useLocation();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [pubkey, setPubkey] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("nutrition");
+  const [activeTab, setActiveTab] = useState("diet");
   const { toast } = useToast();
   const isMobile = useIsMobile();
   const isNative = isNativeApp();
@@ -99,16 +99,7 @@ export default function Dashboard() {
                         Diet Plan
                       </Button>
                     </SheetClose>
-                    <SheetClose asChild>
-                      <Button 
-                        variant="ghost" 
-                        onClick={() => setActiveTab("nutrition")}
-                        className="justify-start w-full"
-                      >
-                        <Activity className="h-4 w-4 mr-2" />
-                        Nutrition Summary
-                      </Button>
-                    </SheetClose>
+
                     <SheetClose asChild>
                       <Button 
                         variant="ghost" 
@@ -138,14 +129,10 @@ export default function Dashboard() {
 
         <main className="flex-1 container px-3 py-4">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid grid-cols-4 mb-4">
+            <TabsList className="grid grid-cols-3 mb-4">
               <TabsTrigger value="diet">
                 <Utensils className="h-4 w-4 mr-2" />
                 <span className="sr-only sm:not-sr-only">Diet</span>
-              </TabsTrigger>
-              <TabsTrigger value="nutrition">
-                <Activity className="h-4 w-4 mr-2" />
-                <span className="sr-only sm:not-sr-only">Nutrition</span>
               </TabsTrigger>
               <TabsTrigger value="water">
                 <Droplets className="h-4 w-4 mr-2" />
@@ -163,19 +150,6 @@ export default function Dashboard() {
                   <DietPlan 
                     userId={user?.id}
                     user={user}
-                  />
-                </CardContent>
-              </Card>
-            </TabsContent>
-            
-            <TabsContent value="nutrition" className="mt-0">
-              <Card>
-                <CardContent className="p-4 pt-4">
-                  <NutritionSummary 
-                    date={selectedDate}
-                    userId={user?.id}
-                    goals={user?.preferences?.macroGoals}
-                    calorieGoal={user?.preferences?.dailyCalorieGoal}
                   />
                 </CardContent>
               </Card>
@@ -236,28 +210,15 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          <div className="space-y-6">
-            <Card>
-              <CardContent className="p-6">
-                <NutritionSummary 
-                  date={selectedDate}
-                  userId={user?.id}
-                  goals={user?.preferences?.macroGoals}
-                  calorieGoal={user?.preferences?.dailyCalorieGoal}
-                />
-              </CardContent>
-            </Card>
-
-            <Card className="h-fit">
-              <CardContent className="p-6">
-                <DailyLog
-                  date={selectedDate}
-                  onDateChange={setSelectedDate}
-                  userId={user?.id}
-                />
-              </CardContent>
-            </Card>
-          </div>
+          <Card className="h-fit">
+            <CardContent className="p-6">
+              <DailyLog
+                date={selectedDate}
+                onDateChange={setSelectedDate}
+                userId={user?.id}
+              />
+            </CardContent>
+          </Card>
         </div>
       </main>
     </div>
